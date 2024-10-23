@@ -53,9 +53,9 @@ def nn(train_d, train_l: pd.DataFrame):
     train_label = tf.reshape(tf.convert_to_tensor(train_l[:, 0:]), [train_len, 1, 1])
     # 3.用softmax进行多分类
     predictions = model(train_data[:1]).numpy()
-    tf.nn.softmax(predictions).numpy()
+    tf.nn.sigmoid(predictions).numpy()
     # 4.定义交叉熵损失函数
-    loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
+    loss_fn = tf.keras.losses.BinaryCrossentropy(from_logits=False)
     loss_fn(train_label[:1], predictions).numpy()
     model.compile(optimizer='adam', loss=loss_fn, metrics=['accuracy'])
     # 5.进行训练
