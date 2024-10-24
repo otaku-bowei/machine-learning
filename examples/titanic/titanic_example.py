@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import tensorflow as tf
+import tool.matplotlib.draw_matplotlib as tm
 
 
 # read_data
@@ -38,6 +39,7 @@ def pd_to_np(train_data, test_data: pd.DataFrame):
 
 # nn 定义一个全连接神经网络
 def nn(train_d, train_l: pd.DataFrame):
+    callback = tf.keras.callbacks.LambdaCallback(on_epoch_end=lambda batch, logs: [callback.on_train_begin])
     train_d = train_d.astype(np.float64)
     train_l = train_l.astype(np.float64)
     # 1.建立全连接神经网络，relu作为激活函数，dropout率为0.2
@@ -45,13 +47,15 @@ def nn(train_d, train_l: pd.DataFrame):
         tf.keras.layers.Flatten(input_shape=(1, 6)),
         tf.keras.layers.Dense(8, activation='relu'),
         tf.keras.layers.Dropout(0.2),
+        tf.keras.layers.Dense(16, activation='relu'),
+        tf.keras.layers.Dropout(0.2),
         tf.keras.layers.Dense(1, activation='sigmoid')
     ])
     # 2.调整数据格式
     train_len = len(train_d)
     train_data = tf.reshape(tf.convert_to_tensor(train_d[:, 0:]), [train_len, 1, 6])
     train_label = tf.reshape(tf.convert_to_tensor(train_l[:, 0:]), [train_len, 1, 1])
-    # 3.用softmax进行多分类
+    # 3.用logistic进行二分类
     predictions = model(train_data[:1]).numpy()
     tf.nn.sigmoid(predictions).numpy()
     # 4.定义交叉熵损失函数
@@ -59,7 +63,11 @@ def nn(train_d, train_l: pd.DataFrame):
     loss_fn(train_label[:1], predictions).numpy()
     model.compile(optimizer='adam', loss=loss_fn, metrics=['accuracy'])
     # 5.进行训练
-    model.fit(train_data, train_label, epochs=5)
+    train_history = model.fit(train_data, train_label, epochs=50, callbacks=[callback])
+    print(callback.on_train_begin)
+    tm.draw_keras_by_key(train_history, 'loss')
+    tm.draw_keras_by_key(train_history, 'accuracy')
+
 
 def main():
     # 1.pd读取数据集，提取相关有用信息并做数据预处理
