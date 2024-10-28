@@ -1,6 +1,8 @@
+import numpy
 import numpy as np
 import pandas as pd
 import tensorflow as tf
+import keras
 import tool.matplotlib.draw_matplotlib as tm
 
 
@@ -25,32 +27,47 @@ def read_data():
     train_data.loc[train_data['Age'].isnull(), ['Age']] = age_mean
     test_data.loc[test_data['Age'].isnull(), ['Age']] = age_mean
     return (train_data.loc[:, ['Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 'Fare', 'Survived']],
-            test_data.loc[:, ['Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 'Fare', 'Survived']])
+            test_data.loc[:, ['Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 'Fare', 'PassengerId']])
 
 
 # pd_to_np pd格式转换为np格式
 def pd_to_np(train_data, test_data: pd.DataFrame):
+    # 乱序
+    train_data = train_data.sample(frac=1).reset_index(drop=True)
+    test_data = test_data.sample(frac=1).reset_index(drop=True)
     train_data_tmp = train_data.loc[:, train_data.columns != 'Survived']
     train_label_tmp = train_data.loc[:, train_data.columns == 'Survived']
-    test_data_tmp = test_data.loc[:, test_data.columns != 'Survived']
-    test_label_tmp = test_data.loc[:, test_data.columns == 'Survived']
+    test_data_tmp = test_data.loc[:, test_data.columns != 'PassengerId']
+    test_label_tmp = test_data.loc[:, test_data.columns == 'PassengerId']
     return train_data_tmp.to_numpy(), train_label_tmp.to_numpy(), test_data_tmp.to_numpy(), test_label_tmp.to_numpy()
 
 
+# read_init_model 读取模型，否则初始化模型
+def read_init_model() -> keras.src.models.sequential.Sequential:
+    model = {}
+    try:
+        model = tf.keras.models.load_model('my_model.keras')
+    except Exception as e:
+        model = tf.keras.models.Sequential([
+            tf.keras.layers.Flatten(input_shape=(1, 6)),
+            tf.keras.layers.Dense(8, activation='relu'),
+            tf.keras.layers.Dropout(0.2),
+            tf.keras.layers.Dense(16, activation='relu'),
+            tf.keras.layers.Dropout(0.2),
+            tf.keras.layers.Dense(1, activation='sigmoid')
+        ])
+    finally:
+        return model
+    # 1.建立全连接神经网络，relu作为激活函数，dropout率为0.2
+
+
 # nn 定义一个全连接神经网络
-def nn(train_d, train_l: pd.DataFrame):
+def nn(train_d, train_l, test_d: pd.DataFrame):
     callback = tf.keras.callbacks.LambdaCallback(on_epoch_end=lambda batch, logs: [callback.on_train_begin])
     train_d = train_d.astype(np.float64)
     train_l = train_l.astype(np.float64)
     # 1.建立全连接神经网络，relu作为激活函数，dropout率为0.2
-    model = tf.keras.models.Sequential([
-        tf.keras.layers.Flatten(input_shape=(1, 6)),
-        tf.keras.layers.Dense(8, activation='relu'),
-        tf.keras.layers.Dropout(0.2),
-        tf.keras.layers.Dense(16, activation='relu'),
-        tf.keras.layers.Dropout(0.2),
-        tf.keras.layers.Dense(1, activation='sigmoid')
-    ])
+    model = read_init_model()
     # 2.调整数据格式
     train_len = len(train_d)
     train_data = tf.reshape(tf.convert_to_tensor(train_d[:, 0:]), [train_len, 1, 6])
@@ -63,17 +80,35 @@ def nn(train_d, train_l: pd.DataFrame):
     loss_fn(train_label[:1], predictions).numpy()
     model.compile(optimizer='adam', loss=loss_fn, metrics=['accuracy'])
     # 5.进行训练
-    train_history = model.fit(train_data, train_label, epochs=50, callbacks=[callback])
-    print(callback.on_train_begin)
+    train_history = model.fit(train_data, train_label, epochs=128, callbacks=[callback])
     tm.draw_keras_by_key(train_history, 'loss')
     tm.draw_keras_by_key(train_history, 'accuracy')
+    # 6.保存模型
+    model.save('my_model.keras')
 
 
+# predict_test_data 预测测试集
+def predict_test_data(test_d, test_l: pd.DataFrame):
+    model = tf.keras.models.load_model('my_model.keras')
+    test_d = test_d.astype(np.float64)
+    test_data = tf.reshape(tf.convert_to_tensor(test_d[:, 0:]), [len(test_d), 1, 6])
+    pre = model.predict(test_data)
+    test_l = tf.reshape(tf.convert_to_tensor(test_l[:, 0:]), [len(test_l), 1])
+    pre = tf.reshape(tf.convert_to_tensor(pre[:, 0:]), [len(pre), 1])
+    pre = np.round(pre).astype(int)
+    result = np.concatenate((test_l, pre), axis=1)
+    output = pd.DataFrame(result, columns=['PassengerId', 'Survived'])
+    output.to_csv('submission.csv', index=False)
+
+
+# main 主函数
 def main():
     # 1.pd读取数据集，提取相关有用信息并做数据预处理
     train_data, test_data = read_data()
+    # 2.整理字段
     train_d, train_l, test_d, test_l = pd_to_np(train_data, test_data)
-    nn(train_d, train_l)
+    nn(train_d, train_l, test_data)
+    predict_test_data(test_d, test_l)
 
 
 if __name__ == "__main__":

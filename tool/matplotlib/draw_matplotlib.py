@@ -14,3 +14,4 @@ def draw_keras_by_key(model_fit_history: keras.src.callbacks.history.History, ke
     plt.ylabel(key + "-value")
     plt.legend()
     plt.show()
+
