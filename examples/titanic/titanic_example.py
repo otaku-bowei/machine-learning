@@ -51,10 +51,11 @@ def read_init_model(file_name: string) -> keras.src.models.sequential.Sequential
     except Exception as e:
         model = tf.keras.models.Sequential([
             tf.keras.layers.Flatten(input_shape=(1, 6)),
-            tf.keras.layers.Dense(8, activation='relu'),
-            tf.keras.layers.Dropout(0.2),
-            tf.keras.layers.Dense(16, activation='relu'),
-            tf.keras.layers.Dropout(0.2),
+            # tf.keras.layers.Dense(8, activation='relu'),
+            # tf.keras.layers.Dropout(0.2),
+            # tf.keras.layers.Dense(16, activation='relu'),
+            # tf.keras.layers.Dropout(0.2),
+            tf.keras.layers.Dense(6, activation='relu'),
             tf.keras.layers.Dense(1, activation='sigmoid')
         ])
     finally:
@@ -83,7 +84,7 @@ def nn(train_d, train_l, test_d: pd.DataFrame):
     # 4.2定义tensorBoard
     tensorboard_callback = tb.draw_board('titanic')
     # 5.进行训练
-    train_history = model.fit(train_data, train_label, epochs=128, callbacks=[tensorboard_callback])
+    train_history = model.fit(train_data, train_label, epochs=256, callbacks=[tensorboard_callback])
     # 6.保存模型
     model.save('my_model.keras')
 
