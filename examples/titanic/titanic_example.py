@@ -1,9 +1,10 @@
-import numpy
+import string
+import datetime
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 import keras
-import tool.matplotlib.draw_matplotlib as tm
+import tool.tensorboard.tensor_board as tb
 
 
 # read_data
@@ -43,10 +44,10 @@ def pd_to_np(train_data, test_data: pd.DataFrame):
 
 
 # read_init_model 读取模型，否则初始化模型
-def read_init_model() -> keras.src.models.sequential.Sequential:
+def read_init_model(file_name: string) -> keras.src.models.sequential.Sequential:
     model = {}
     try:
-        model = tf.keras.models.load_model('my_model.keras')
+        model = tf.keras.models.load_model(file_name)
     except Exception as e:
         model = tf.keras.models.Sequential([
             tf.keras.layers.Flatten(input_shape=(1, 6)),
@@ -67,7 +68,7 @@ def nn(train_d, train_l, test_d: pd.DataFrame):
     train_d = train_d.astype(np.float64)
     train_l = train_l.astype(np.float64)
     # 1.建立全连接神经网络，relu作为激活函数，dropout率为0.2
-    model = read_init_model()
+    model = read_init_model('my_model.keras')
     # 2.调整数据格式
     train_len = len(train_d)
     train_data = tf.reshape(tf.convert_to_tensor(train_d[:, 0:]), [train_len, 1, 6])
@@ -75,14 +76,14 @@ def nn(train_d, train_l, test_d: pd.DataFrame):
     # 3.用logistic进行二分类
     predictions = model(train_data[:1]).numpy()
     tf.nn.sigmoid(predictions).numpy()
-    # 4.定义交叉熵损失函数
+    # 4.1定义交叉熵损失函数
     loss_fn = tf.keras.losses.BinaryCrossentropy(from_logits=False)
     loss_fn(train_label[:1], predictions).numpy()
     model.compile(optimizer='adam', loss=loss_fn, metrics=['accuracy'])
+    # 4.2定义tensorBoard
+    tensorboard_callback = tb.draw_board('titanic')
     # 5.进行训练
-    train_history = model.fit(train_data, train_label, epochs=128, callbacks=[callback])
-    tm.draw_keras_by_key(train_history, 'loss')
-    tm.draw_keras_by_key(train_history, 'accuracy')
+    train_history = model.fit(train_data, train_label, epochs=128, callbacks=[tensorboard_callback])
     # 6.保存模型
     model.save('my_model.keras')
 
@@ -99,6 +100,9 @@ def predict_test_data(test_d, test_l: pd.DataFrame):
     result = np.concatenate((test_l, pre), axis=1)
     output = pd.DataFrame(result, columns=['PassengerId', 'Survived'])
     output.to_csv('submission.csv', index=False)
+
+
+# def draw_train_function():
 
 
 # main 主函数
