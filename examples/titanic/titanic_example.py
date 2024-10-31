@@ -55,7 +55,7 @@ def read_init_model(file_name: string) -> keras.src.models.sequential.Sequential
             # tf.keras.layers.Dropout(0.2),
             # tf.keras.layers.Dense(16, activation='relu'),
             # tf.keras.layers.Dropout(0.2),
-            tf.keras.layers.Dense(6, activation='relu'),
+            # tf.keras.layers.Dense(6, activation='relu'),
             tf.keras.layers.Dense(1, activation='sigmoid')
         ])
     finally:

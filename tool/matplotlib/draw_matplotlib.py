@@ -37,3 +37,31 @@ def draw_model(path: string, x_train, y_train: np.float64):
 
     # 显示图形
     plt.show()
+
+
+def draw_2d_point(x, y: np.float64):
+    plt.scatter(x, y)
+    plt.xlabel('x')
+    plt.ylabel('y')
+    # plt.plot(x, y, color='red')
+    plt.show()
+
+
+def draw_2d_line(m, b: np.float64, x_range=(-10, 10)):
+    # 生成x的值
+    x = np.linspace(x_range[0], x_range[1],  4000)
+    # 计算y的值
+    y = x * m + b
+    # 创建一个新的图形
+    plt.figure()
+    # 绘制直线
+    plt.plot(x, y, label=f'y = {m}x + {b}', color='red')
+    # 添加标题和标签
+    plt.title('Plot of the line y = mx + b')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    plt.legend()
+    # 显示网格
+    plt.grid(True)
+    # 显示图形
+    plt.show()
