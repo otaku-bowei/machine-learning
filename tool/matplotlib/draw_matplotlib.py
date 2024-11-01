@@ -39,29 +39,59 @@ def draw_model(path: string, x_train, y_train: np.float64):
     plt.show()
 
 
-def draw_2d_point(x, y: np.float64):
-    plt.scatter(x, y)
+def draw_2d_point(x, y: np.float64, point_size=20, color='blue'):
+    plt.scatter(x, y, point_size)
     plt.xlabel('x')
     plt.ylabel('y')
-    # plt.plot(x, y, color='red')
+    # plt.plot(x, y, color='green')
     plt.show()
 
 
-def draw_2d_line(m, b: np.float64, x_range=(-10, 10)):
+def draw_2d_line(m, b: np.float64, x_range=(-10, 10), color='blue'):
     # 生成x的值
-    x = np.linspace(x_range[0], x_range[1],  4000)
+    x = np.arange(x_range[0], x_range[1],  0.1)
+    x = x.reshape(1, int(x.shape[0]))
     # 计算y的值
     y = x * m + b
-    # 创建一个新的图形
-    plt.figure()
-    # 绘制直线
-    plt.plot(x, y, label=f'y = {m}x + {b}', color='red')
-    # 添加标题和标签
-    plt.title('Plot of the line y = mx + b')
+    draw_2d_point(x, y, 1, color=color)
+
+
+def draw_data_line(x_t, y_t, m, b: np.float64, x_range=(-10, 10), color='blue'):
+    plt.scatter(x_t, y_t, 1, 'blue')
     plt.xlabel('x')
     plt.ylabel('y')
-    plt.legend()
-    # 显示网格
-    plt.grid(True)
-    # 显示图形
+    # plt.plot(x, y, color='green')
+    # 生成x的值
+    x = np.arange(x_range[0], x_range[1],  0.1)
+    x = x.reshape(1, int(x.shape[0]))
+    # 计算y的值
+    y = x * m + b
+    plt.scatter(x, y, 1, color='red')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    # plt.plot(x, y, color='green')
+    plt.show()
+
+
+def compare_draw_data_line(x_t, y_t, m1, b1, m2, b2: np.float64, x_range=(-10, 10), color='blue'):
+    plt.scatter(x_t, y_t, 1, 'blue')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    # plt.plot(x, y, color='green')
+    # 生成x的值
+    x = np.arange(x_range[0], x_range[1],  0.1)
+    x1 = x.reshape(1, int(x.shape[0]))
+    # 计算y的值
+    y1 = x1 * m1 + b1
+    plt.scatter(x1, y1, 1, color='red')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    # plt.plot(x, y, color='green')
+    x2 = x.reshape(1, int(x.shape[0]))
+    # 计算y的值
+    y2 = x2 * m2 + b2
+    plt.scatter(x2, y2, 1, color='yellow')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    # plt.plot(x, y, color='green')
     plt.show()

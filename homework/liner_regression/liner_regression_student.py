@@ -40,17 +40,18 @@ def pd_data_to_np():
 # train 训练，整理数据，利用梯度下降，根据损失函数找到凸函数的最点
 def train():
     x_np, y_np = pd_data_to_np()
-    # 此处可以对比，当一开始的w设置的已经接近的时候，梯度下降的很慢，因为已经很接近 局部最小值
+    # 此处可以对比，当一开始的w设置的已经接近的时候，梯度下降的很慢，因为已经很接近 局部最小值--对比不用matrix(准确率更低)
     w = np.matrix(np.array([0]))
+    # w = np.array([0])
     # w = np.matrix(np.array([1]))
     b = 0
     # 体现了学习率的作用，学习率必须根据损失函数的偏导数调整，真实数据根据损失函数的偏导数很大,而w本身局部最小值较小时，容易发生梯度震荡
     w, b, cost = batch_gradient_descent(x_np, y_np, w.T, b, 0.000001, 1000)
     # tm.draw_2d_line(w.ravel()[0], b, x_range=(0, 100))
-    print(w)
+    print(np.array(w.tolist()))
     print(b)
     print(cost)
-    return w, b, cost
+    return np.array(w.tolist()), b, cost
 
 
 # train_by_sklearn 用sklearn训练
@@ -60,6 +61,8 @@ def train_by_sklearn():
     reg.fit(x_np, y_np)
     print(reg.coef_)
     print(reg.intercept_)
+    # tm.draw_data_line(x_np, y_np, reg.coef_, reg.intercept_, x_range=(0, 100))
+    return reg.coef_, reg.intercept_
 
 
 # batch_gradient_descent 根据学习率和迭代次数进行批量梯度下降 θ[j]=θ[j]-α(əJ(θ)/əθ[j])
@@ -103,8 +106,14 @@ def batch_gradient_descent(X, y, w, b, learning_rate, num_iterations):
 
 # main 主函数
 def main():
-    train()
-    train_by_sklearn()
+    x_np, y_np = pd_data_to_np()
+    w1, b1, c1 = train()
+    w2, b2 = train_by_sklearn()
+    print(w1)
+    print(w2)
+    print(w1.shape)
+    print(w2.shape)
+    tm.compare_draw_data_line(x_np, y_np, w2, b2, w1, b1, x_range=(0, 100))
 
 
 if __name__ == "__main__":
