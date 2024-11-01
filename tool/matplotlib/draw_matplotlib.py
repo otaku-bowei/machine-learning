@@ -79,17 +79,19 @@ def compare_draw_data_line(x_t, y_t, m1, b1, m2, b2: np.float64, x_range=(-10, 1
     plt.ylabel('y')
     # plt.plot(x, y, color='green')
     # 生成x的值
-    x = np.arange(x_range[0], x_range[1],  0.1)
+    x = np.arange(x_range[0], x_range[1],  0.001)
     x1 = x.reshape(1, int(x.shape[0]))
     # 计算y的值
-    y1 = x1 * m1 + b1
+    # y1 = x1 * m1 + b1
+    y1 = x1 * m1[2] + np.power(x1, 2) * m1[1] + np.power(x1, 3) * m1[1] + b1
     plt.scatter(x1, y1, 1, color='red')
     plt.xlabel('x')
     plt.ylabel('y')
     # plt.plot(x, y, color='green')
     x2 = x.reshape(1, int(x.shape[0]))
     # 计算y的值
-    y2 = x2 * m2 + b2
+    # y2 = x2 * m2 + b2
+    y2 = x2 * m2[2] + np.power(x2, 2) * m2[1] + np.power(x2, 3) * m2[1] + b2
     plt.scatter(x2, y2, 1, color='yellow')
     plt.xlabel('x')
     plt.ylabel('y')
