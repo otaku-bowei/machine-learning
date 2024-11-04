@@ -1,4 +1,5 @@
 import tensorflow as tf
+import tool.tensorboard.tensor_board as tb
 
 
 def MnistTestNn():
@@ -20,8 +21,10 @@ def MnistTestNn():
     loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
     loss_fn(y_train[:1], predictions).numpy()
     model.compile(optimizer='adam', loss=loss_fn, metrics=['accuracy'])
+    # 4.2定义tensorBoard
+    tensorboard_callback = tb.draw_board('mnist')
     #5.进行训练
-    model.fit(x_train, y_train, epochs=5)
+    model.fit(x_train, y_train, epochs=5, callbacks=[tensorboard_callback])
     model.evaluate(x_test, y_test, verbose=2)
     probability_model = tf.keras.Sequential([
         model,

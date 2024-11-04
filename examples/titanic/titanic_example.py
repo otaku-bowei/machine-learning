@@ -23,6 +23,8 @@ def read_data():
     train_data.loc[train_data['Sex'] == 'female', ['Sex']] = 0
     test_data.loc[test_data['Sex'] == 'male', ['Sex']] = 1
     test_data.loc[test_data['Sex'] == 'female', ['Sex']] = 0
+    # 特征缩放：年龄、票价
+    print(train_data.describe())
     # 年龄为空的填平均值
     age_mean = train_data['Age'].mean()
     train_data.loc[train_data['Age'].isnull(), ['Age']] = age_mean
@@ -50,8 +52,7 @@ def read_init_model(file_name: string) -> keras.src.models.sequential.Sequential
         model = tf.keras.models.load_model(file_name)
     except Exception as e:
         model = tf.keras.models.Sequential([
-            tf.keras.layers.Flatten(input_shape=(1, 6)),
-            # tf.keras.layers.Dense(8, activation='relu'),
+            tf.keras.layers.Dense(8, activation='relu'),
             # tf.keras.layers.Dropout(0.2),
             # tf.keras.layers.Dense(16, activation='relu'),
             # tf.keras.layers.Dropout(0.2),
@@ -72,8 +73,11 @@ def nn(train_d, train_l, test_d: pd.DataFrame):
     model = read_init_model('my_model.keras')
     # 2.调整数据格式
     train_len = len(train_d)
-    train_data = tf.reshape(tf.convert_to_tensor(train_d[:, 0:]), [train_len, 1, 6])
-    train_label = tf.reshape(tf.convert_to_tensor(train_l[:, 0:]), [train_len, 1, 1])
+    # print(type(train_d))
+    # train_data = tf.reshape(tf.convert_to_tensor(train_d[:, 0:]), [train_len, 1, 6])
+    # train_label = tf.reshape(tf.convert_to_tensor(train_l[:, 0:]), [train_len, 1, 1])
+    train_data = train_d
+    train_label = train_l
     # 3.用logistic进行二分类
     predictions = model(train_data[:1]).numpy()
     tf.nn.sigmoid(predictions).numpy()
@@ -113,7 +117,7 @@ def main():
     # 2.整理字段
     train_d, train_l, test_d, test_l = pd_to_np(train_data, test_data)
     nn(train_d, train_l, test_data)
-    predict_test_data(test_d, test_l)
+    # predict_test_data(test_d, test_l)
 
 
 if __name__ == "__main__":

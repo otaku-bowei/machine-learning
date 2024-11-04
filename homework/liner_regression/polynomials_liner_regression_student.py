@@ -61,10 +61,14 @@ def train_by_sklearn():
     # 3次方
     reg = pping.PolynomialFeatures(degree=3)
     liner = lm.LinearRegression()
-    pipeline = pl.make_pipeline(reg, liner)
+    # pipeline = pl.make_pipeline(reg, liner)
+    # 使用Pipeline将两个步骤链接起来
+    pipeline = pl.Pipeline([("polynomial_features", reg), ("linear_regression", liner)])
     # pipeline = pl.Pipeline([('reg', reg), ('liner', liner)])
     pipeline.fit(x_np, y_np)
-    print(pipeline.named_steps)
+    print(pipeline.named_steps.get('polynomial_features'))
+    print(liner.coef_)
+    print(liner.intercept_)
     # tm.draw_data_line(x_np, y_np, reg.coef_, reg.intercept_, x_range=(0, 100))
     return liner.coef_, liner.intercept_
 
@@ -122,6 +126,7 @@ def main():
     w1, b1, c1 = train()
     w2, b2 = train_by_sklearn()
     # 多项式中，自定义的梯度下降函数比sklearn的更准确
+    tm.compare_draw_data_line(x_np, y_np, w2[0][:3], b2, w2[0][:3], w2[0][3], x_range=(0, 1))
     tm.compare_draw_data_line(x_np, y_np, w2[0][:3], b2, w1, b1, x_range=(0, 1))
 
 
