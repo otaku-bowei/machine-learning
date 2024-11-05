@@ -79,11 +79,11 @@ def nn(train_d, train_l, test_d: pd.DataFrame):
     train_data = train_d
     train_label = train_l
     # 3.用logistic进行二分类
-    predictions = model(train_data[:1]).numpy()
-    tf.nn.sigmoid(predictions).numpy()
+    # predictions = model(train_data[:1]).numpy()
+    # tf.nn.sigmoid(predictions).numpy()
     # 4.1定义交叉熵损失函数
     loss_fn = tf.keras.losses.BinaryCrossentropy(from_logits=False)
-    loss_fn(train_label[:1], predictions).numpy()
+    # loss_fn(train_label[:1], predictions).numpy()
     model.compile(optimizer='adam', loss=loss_fn, metrics=['accuracy'])
     # 4.2定义tensorBoard
     tensorboard_callback = tb.draw_board('titanic')
