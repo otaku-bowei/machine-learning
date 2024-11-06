@@ -37,8 +37,6 @@ def deal_data():
     print(train_data.describe())
     train_data.to_csv('train_deal.csv', index=False)
     train_data.to_csv('test_deal.csv', index=False)
-    train_data = train_data.loc[:, ['brand', 'model_year', 'milage', 'engine', 'transmission', 'ext_col', 'int_col', 'accident', 'price']]
-    test_data = test_data.loc[:, ['brand', 'model_year', 'milage', 'engine', 'transmission', 'ext_col', 'int_col', 'accident', 'id']]
 
 
 # read_data
@@ -46,7 +44,12 @@ def read_data():
     # 读取文件
     train_data = pd.read_csv(".\\train_deal.csv")
     test_data = pd.read_csv(".\\test_deal.csv")
-    return (train_data, test_data)
+    # 空缺数据补空值--测试集和训练集都要
+    train_data.loc[test_data['accident'].isnull(), ['accident']] = 49024.80414354319
+    test_data.loc[test_data['accident'].isnull(), ['accident']] = 49024.80414354319
+    train_data = train_data.loc[:, ['brand', 'model_year', 'milage', 'engine', 'transmission', 'ext_col', 'int_col', 'accident', 'price']]
+    test_data = test_data.loc[:, ['brand', 'model_year', 'milage', 'engine', 'transmission', 'ext_col', 'int_col', 'accident', 'id']]
+    return train_data, test_data
 
 
 # pd_to_np pd格式转换为np格式
@@ -68,12 +71,10 @@ def read_init_model(file_name: string) -> keras.src.models.sequential.Sequential
         model = tf.keras.models.load_model(file_name)
     except Exception as e:
         model = tf.keras.models.Sequential([
-            tf.keras.layers.Dense(8, activation='relu'),
-            # tf.keras.layers.Dropout(0.2),
-            # tf.keras.layers.Dense(16, activation='relu'),
-            # tf.keras.layers.Dropout(0.2),
-            # tf.keras.layers.Dense(6, activation='relu'),
-            tf.keras.layers.Dense(1, activation='sigmoid')
+            # 特征缩放
+            tf.keras.layers.experimental.preprocessing.Normalization(),
+            tf.keras.layers.Dense(16, activation='relu'),
+            tf.keras.layers.Dense(1)
         ])
     finally:
         return model
@@ -83,28 +84,18 @@ def read_init_model(file_name: string) -> keras.src.models.sequential.Sequential
 # nn 定义一个全连接神经网络
 def nn(train_d, train_l, test_d: pd.DataFrame):
     callback = tf.keras.callbacks.LambdaCallback(on_epoch_end=lambda batch, logs: [callback.on_train_begin])
-    train_d = train_d.astype(np.float64)
-    train_l = train_l.astype(np.float64)
     # 1.建立全连接神经网络，relu作为激活函数，dropout率为0.2
     model = read_init_model('my_model.keras')
     # 2.调整数据格式
-    train_len = len(train_d)
-    # print(type(train_d))
-    # train_data = tf.reshape(tf.convert_to_tensor(train_d[:, 0:]), [train_len, 1, 6])
-    # train_label = tf.reshape(tf.convert_to_tensor(train_l[:, 0:]), [train_len, 1, 1])
-    train_data = train_d
-    train_label = train_l
-    # 3.用logistic进行二分类
-    # predictions = model(train_data[:1]).numpy()
-    # tf.nn.sigmoid(predictions).numpy()
+    train_data = train_d.astype(np.float64)
+    train_label = train_l.astype(np.float64)
     # 4.1定义交叉熵损失函数
-    loss_fn = tf.keras.losses.BinaryCrossentropy(from_logits=False)
-    # loss_fn(train_label[:1], predictions).numpy()
+    loss_fn = tf.keras.losses.MeanSquaredError()
     model.compile(optimizer='adam', loss=loss_fn, metrics=['accuracy'])
     # 4.2定义tensorBoard
-    tensorboard_callback = tb.draw_board('titanic')
+    tensorboard_callback = tb.draw_board('secondhandCycle')
     # 5.进行训练
-    train_history = model.fit(train_data, train_label, epochs=256, callbacks=[tensorboard_callback])
+    train_history = model.fit(train_data, train_label, epochs=10, callbacks=[tensorboard_callback])
     # 6.保存模型
     model.save('my_model.keras')
 
@@ -119,7 +110,7 @@ def predict_test_data(test_d, test_l: pd.DataFrame):
     pre = tf.reshape(tf.convert_to_tensor(pre[:, 0:]), [len(pre), 1])
     pre = np.round(pre).astype(int)
     result = np.concatenate((test_l, pre), axis=1)
-    output = pd.DataFrame(result, columns=['PassengerId', 'Survived'])
+    output = pd.DataFrame(result, columns=['id', 'price'])
     output.to_csv('submission.csv', index=False)
 
 
@@ -129,13 +120,16 @@ def predict_test_data(test_d, test_l: pd.DataFrame):
 # main 主函数
 def main():
     # 1.数据特征处理
-    deal_data()
-    # # 1.pd读取数据集，提取相关有用信息并做数据预处理
-    # train_data, test_data = read_data()
-    # # 2.整理字段
-    # train_d, train_l, test_d, test_l = pd_to_np(train_data, test_data)
-    # nn(train_d, train_l, test_data)
-    # # predict_test_data(test_d, test_l)
+    # deal_data()
+    # 1.pd读取数据集，提取相关有用信息并做数据预处理
+    train_data, test_data = read_data()
+    pd.set_option('display.max_rows', None)
+    pd.set_option('display.max_columns', None)
+    print(train_data.describe())
+    # 2.整理字段
+    train_d, train_l, test_d, test_l = pd_to_np(train_data, test_data)
+    nn(train_d, train_l, test_data)
+    # predict_test_data(test_d, test_l)
 
 
 if __name__ == "__main__":
