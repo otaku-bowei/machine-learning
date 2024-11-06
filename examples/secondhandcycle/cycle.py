@@ -72,7 +72,8 @@ def read_init_model(file_name: string) -> keras.src.models.sequential.Sequential
     except Exception as e:
         model = tf.keras.models.Sequential([
             # 特征缩放
-            tf.keras.layers.experimental.preprocessing.Normalization(),
+            # tf.keras.layers.experimental.preprocessing.Rescaling(1./5000),
+            # tf.keras.layers.experimental.preprocessing.Normalization(),
             tf.keras.layers.Dense(16, activation='relu'),
             tf.keras.layers.Dense(1)
         ])
@@ -84,14 +85,17 @@ def read_init_model(file_name: string) -> keras.src.models.sequential.Sequential
 # nn 定义一个全连接神经网络
 def nn(train_d, train_l, test_d: pd.DataFrame):
     callback = tf.keras.callbacks.LambdaCallback(on_epoch_end=lambda batch, logs: [callback.on_train_begin])
-    # 1.建立全连接神经网络，relu作为激活函数，dropout率为0.2
+    # 1.建立全连接神经网络
     model = read_init_model('my_model.keras')
     # 2.调整数据格式
     train_data = train_d.astype(np.float64)
     train_label = train_l.astype(np.float64)
+    train_data = train_data / 5000.
+    train_label = train_label / 300000.
+    print(train_data[0])
     # 4.1定义交叉熵损失函数
     loss_fn = tf.keras.losses.MeanSquaredError()
-    model.compile(optimizer='adam', loss=loss_fn, metrics=['accuracy'])
+    model.compile(optimizer='adam', loss=loss_fn, metrics=['mse'])
     # 4.2定义tensorBoard
     tensorboard_callback = tb.draw_board('secondhandCycle')
     # 5.进行训练
@@ -104,6 +108,7 @@ def nn(train_d, train_l, test_d: pd.DataFrame):
 def predict_test_data(test_d, test_l: pd.DataFrame):
     model = tf.keras.models.load_model('my_model.keras')
     test_d = test_d.astype(np.float64)
+    test_d = test_d / 5000.
     test_data = tf.reshape(tf.convert_to_tensor(test_d[:, 0:]), [len(test_d), 1, 6])
     pre = model.predict(test_data)
     test_l = tf.reshape(tf.convert_to_tensor(test_l[:, 0:]), [len(test_l), 1])
