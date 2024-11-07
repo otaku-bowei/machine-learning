@@ -105,8 +105,8 @@ def read_init_model(file_name: string) -> keras.src.models.sequential.Sequential
     except Exception as e:
         model = tf.keras.models.Sequential([
             # 此处加了一层32个神经元，分数提高了一点
-            tf.keras.layers.Dense(32),
-            tf.keras.layers.Dense(16),
+            tf.keras.layers.Dense(128, activation='relu'),
+            tf.keras.layers.Dense(16, activation='relu'),
             tf.keras.layers.Dense(1)
         ])
     finally:
@@ -128,7 +128,7 @@ def nn(train_d, train_l, test_d: pd.DataFrame):
     # 4.2定义tensorBoard
     tensorboard_callback = tb.draw_board('secondhandCycle')
     # 5.进行训练
-    train_history = model.fit(train_data, train_label, epochs=100, callbacks=[tensorboard_callback])
+    train_history = model.fit(train_data, train_label, epochs=16, callbacks=[tensorboard_callback])
     # 6.保存模型
     model.save('my_model.keras')
 
