@@ -47,7 +47,7 @@ def train():
     # w = np.matrix(np.array([1]))
     b = 0
     # 体现了学习率的作用，学习率必须根据损失函数的偏导数调整，真实数据根据损失函数的偏导数很大,而w本身局部最小值较小时，容易发生梯度震荡
-    w, b, cost = batch_gradient_descent(x_np, y_np, w.T, b, 0.001, 1000)
+    w, b, cost = batch_gradient_descent(x_np, y_np, w.T, b, 0.001, 3600)
     # tm.draw_2d_line(w.ravel()[0], b, x_range=(0, 100))
     print(np.array(w.tolist()))
     print(b)
@@ -70,7 +70,7 @@ def train_by_sklearn():
     print(liner.coef_)
     print(liner.intercept_)
     # tm.draw_data_line(x_np, y_np, reg.coef_, reg.intercept_, x_range=(0, 100))
-    return liner.coef_, liner.intercept_
+    return pipeline.named_steps['linear_regression'].coef_, pipeline.named_steps['linear_regression'].intercept_
 
 
 # batch_gradient_descent 根据学习率和迭代次数进行批量梯度下降 θ[j]=θ[j]-α(əJ(θ)/əθ[j])
@@ -127,7 +127,8 @@ def main():
     w2, b2 = train_by_sklearn()
     # 多项式中，自定义的梯度下降函数比sklearn的更准确
     tm.compare_draw_data_line(x_np, y_np, w2[0][:3], b2, w2[0][:3], w2[0][3], x_range=(0, 1))
-    tm.compare_draw_data_line(x_np, y_np, w2[0][:3], b2, w1, b1, x_range=(0, 1))
+    # tm.compare_draw_data_line(x_np, y_np, w2[0][:3], b2, w1, b1, x_range=(0, 1))
+    # tm.compare_draw_data_line(x_np, y_np, w2[0][:3], w2[0][3], w1, b1, x_range=(0, 1))
 
 
 if __name__ == "__main__":

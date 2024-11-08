@@ -3,8 +3,13 @@ import string
 import datetime
 import numpy as np
 import pandas as pd
+import sklearn.linear_model
 import tensorflow as tf
 import keras
+from datashader import Pipeline
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.linear_model import LinearRegression
+
 import tool.tensorboard.tensor_board as tb
 
 
@@ -106,6 +111,9 @@ def read_init_model(file_name: string) -> keras.src.models.sequential.Sequential
         model = tf.keras.models.Sequential([
             # 此处加了一层32个神经元，分数提高了一点
             tf.keras.layers.Dense(128, activation='relu'),
+            # tf.keras.layers.Dense(256, activation='relu'),
+            # tf.keras.layers.Dense(64, activation='relu'),
+            # tf.keras.layers.Dense(128, activation='relu', kernel_regularizer=0.01),
             tf.keras.layers.Dense(16, activation='relu'),
             tf.keras.layers.Dense(1)
         ])
@@ -147,7 +155,13 @@ def predict_test_data(test_d, test_l: pd.DataFrame, max_price: float):
     output.to_csv('submission.csv', index=False)
 
 
-# def draw_train_function():
+# train_by_sklearn 用sklearn做多项式回归学习
+def train_by_sklearn(train_data, train_label: pd.DataFrame):
+    model = Pipeline([('poly'), PolynomialFeatures(degree=3), ('linear', LinearRegression(fit_intercept=False))])
+    x = train_data
+    y = x ** 3 - x ** 2 + 2 * x - 5
+    model = model.fit(x[:, np.newaxis], y)
+    return model.named_steps['linear'].coef_
 
 
 # main 主函数

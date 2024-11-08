@@ -84,6 +84,7 @@ def compare_draw_data_line(x_t, y_t, m1, b1, m2, b2: np.float64, x_range=(-10, 1
     # 计算y的值
     # y1 = x1 * m1 + b1
     y1 = x1 * m1[2] + np.power(x1, 2) * m1[1] + np.power(x1, 3) * m1[1] + b1
+    # y1 = x1 * m1[4] + np.power(x1, 2) * m1[3] + np.power(x1, 3) * m1[2] + np.power(x1, 4) * m1[1] + np.power(x1, 5) * m1[0] + b1
     plt.scatter(x1, y1, 1, color='red')
     plt.xlabel('x')
     plt.ylabel('y')
