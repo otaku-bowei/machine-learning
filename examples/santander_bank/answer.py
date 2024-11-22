@@ -1,374 +1,272 @@
-import fastai
-from fastai.tabular import *
-from fastai.text import *
-import feather
-import gc
-from sklearn.preprocessing import StandardScaler
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Apr 11 13:36:18 2019
+
+@author: kazuki.onodera
+
+
+└── input
+    ├── sample_submission.csv.zip
+    ├── test.csv.zip
+    └── train.csv.zip
+
+https://www.kaggle.com/competitions/santander-customer-transaction-prediction/discussion/88939
+
+"""
+
+import numpy as np
+import pandas as pd
+import gc, os
+
+import lightgbm as lgb
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold
-from tqdm import tqdm
-from fastai.callbacks import SaveModelCallback
-import logging
-
-
-# logger
-def get_logger():
-    FORMAT = '[%(levelname)s]%(asctime)s:%(name)s:%(message)s'
-    logging.basicConfig(format=FORMAT)
-    logger = logging.getLogger('main')
-    logger.setLevel(logging.DEBUG)
-    return logger
-
-
-logger = get_logger()
-
-
-def auroc_score(input, target):
-    input, target = input.cpu().numpy()[:, 1], target.cpu().numpy()
-    return roc_auc_score(target, input)
-
-
-# Callback to calculate AUC at the end of each epoch
-class AUROC(Callback):
-    _order = -20  # Needs to run before the recorder
-
-    def __init__(self, learn, **kwargs):
-        self.learn = learn
-
-    def on_train_begin(self, **kwargs):
-        self.learn.recorder.add_metric_names(['AUROC'])
-
-    def on_epoch_begin(self, **kwargs):
-        self.output, self.target = [], []
-
-    def on_batch_end(self, last_target, last_output, train, **kwargs):
-        if not train:
-            self.output.append(last_output)
-            self.target.append(last_target)
-
-    def on_epoch_end(self, last_metrics, **kwargs):
-        if len(self.output) > 0:
-            output = torch.cat(self.output)
-            target = torch.cat(self.target)
-            preds = F.softmax(output, dim=1)
-            metric = auroc_score(preds, target)
-            return add_metrics(last_metrics, [metric])
-
-
-# Callback that do the shuffle augmentation
-class AugShuffCallback(LearnerCallback):
-    def __init__(self, learn: Learner):
-        super().__init__(learn)
-
-    def on_batch_begin(self, last_input, last_target, train, **kwargs):
-        if not train: return
-        m_pos = last_target == 1
-        m_neg = last_target == 0
-
-        pos_cat = last_input[0][m_pos]
-        pos_cont = last_input[1][m_pos]
-
-        neg_cat = last_input[0][m_neg]
-        neg_cont = last_input[1][m_neg]
-
-        for f in range(200):
-            shuffle_pos = torch.randperm(pos_cat.size(0)).to(last_input[0].device)
-            pos_cat[:, f] = pos_cat[shuffle_pos, f]
-            pos_cont[:, f] = pos_cont[shuffle_pos, f]
-            pos_cont[:, f + 200] = pos_cont[shuffle_pos, f + 200]
-
-            shuffle_neg = torch.randperm(neg_cat.size(0)).to(last_input[0].device)
-            neg_cat[:, f] = neg_cat[shuffle_neg, f]
-            neg_cont[:, f] = neg_cont[shuffle_neg, f]
-            neg_cont[:, f + 200] = neg_cont[shuffle_neg, f + 200]
-
-        new_input = [torch.cat([pos_cat, neg_cat]), torch.cat([pos_cont, neg_cont])]
-        new_target = torch.cat([last_target[m_pos], last_target[m_neg]])
-
-        return {'last_input': new_input, 'last_target': new_target}
-
-
-# Just a longer version of the random sampler : each samples is given "mult" times.
-class LongerRandomSampler(Sampler):
-    def __init__(self, data_source, replacement=False, num_samples=None, mult=3):
-        self.data_source = data_source
-        self.replacement = replacement
-        self.num_samples = num_samples
-        self.mult = mult
-
-        if self.num_samples is not None and replacement is False:
-            raise ValueError("With replacement=False, num_samples should not be specified, "
-                             "since a random permute will be performed.")
-
-        if self.num_samples is None:
-            self.num_samples = len(self.data_source) * self.mult
-
-        if not isinstance(self.num_samples, int) or self.num_samples <= 0:
-            raise ValueError("num_samples should be a positive integeral "
-                             "value, but got num_samples={}".format(self.num_samples))
-        if not isinstance(self.replacement, bool):
-            raise ValueError("replacement should be a boolean value, but got "
-                             "replacement={}".format(self.replacement))
-
-    def __iter__(self):
-        n = len(self.data_source)
-        if self.replacement:
-            return iter(torch.randint(high=n, size=(self.num_samples * self.mult,), dtype=torch.int64).tolist())
-        return iter(torch.randperm(n).tolist() * self.mult)
-
-    def __len__(self):
-        return len(self.data_source) * self.mult
-
-
-# This is the NN structure, starting from fast.ai TabularModel.
-class my_TabularModel(nn.Module):
-    "Basic model for tabular data."
-
-    def __init__(self, emb_szs: ListSizes, n_cont: int, out_sz: int, layers: Collection[int],
-                 ps: Collection[float] = None,
-                 emb_drop: float = 0., y_range: OptRange = None, use_bn: bool = True, bn_final: bool = False,
-                 cont_emb=2, cont_emb_notu=2):
-        super().__init__()
-        # "Continuous embedding NN for raw features"
-        self.cont_emb = cont_emb[1]
-        self.cont_emb_l = torch.nn.Linear(1 + 2, cont_emb[0])
-        self.cont_emb_l2 = torch.nn.Linear(cont_emb[0], cont_emb[1])
-
-        # "Continuous embedding NN for "not unique" features". cf #1 solution post
-        self.cont_emb_notu_l = torch.nn.Linear(1 + 2, cont_emb_notu[0])
-        self.cont_emb_notu_l2 = torch.nn.Linear(cont_emb_notu[0], cont_emb_notu[1])
-        self.cont_emb_notu = cont_emb_notu[1]
-
-        ps = ifnone(ps, [0] * len(layers))
-        ps = listify(ps, layers)
-
-        # Embedding for "has one" categorical features, cf #1 solution post
-        self.embeds = embedding(emb_szs[0][0], emb_szs[0][1])
-
-        # At first we included information about the variable being processed (to extract feature importance).
-        # It works better using a constant feat (kind of intercept)
-        self.embeds_feat = embedding(201, 2)
-        self.embeds_feat_w = embedding(201, 2)
-
-        self.emb_drop = nn.Dropout(emb_drop)
-
-        n_emb = self.embeds.embedding_dim
-        n_emb_feat = self.embeds_feat.embedding_dim
-        n_emb_feat_w = self.embeds_feat_w.embedding_dim
-
-        self.n_emb, self.n_emb_feat, self.n_emb_feat_w, self.n_cont, self.y_range = n_emb, n_emb_feat, n_emb_feat_w, n_cont, y_range
-
-        sizes = self.get_sizes(layers, out_sz)
-        actns = [nn.ReLU(inplace=True)] * (len(sizes) - 2) + [None]
-        layers = []
-        for i, (n_in, n_out, dp, act) in enumerate(zip(sizes[:-1], sizes[1:], [0.] + ps, actns)):
-            layers += bn_drop_lin(n_in, n_out, bn=use_bn and i != 0, p=dp, actn=act)
-
-        self.layers = nn.Sequential(*layers)
-        self.seq = nn.Sequential()
-
-        # Input size for the NN that predicts weights
-        inp_w = self.n_emb + self.n_emb_feat_w + self.cont_emb + self.cont_emb_notu
-        # Input size for the final NN that predicts output
-        inp_x = self.n_emb + self.cont_emb + self.cont_emb_notu
-
-        # NN that predicts the weights
-        self.weight = nn.Linear(inp_w, 5)
-        self.weight2 = nn.Linear(5, 1)
-
-        mom = 0.1
-        self.bn_cat = nn.BatchNorm1d(200, momentum=mom)
-        self.bn_feat_emb = nn.BatchNorm1d(200, momentum=mom)
-        self.bn_feat_w = nn.BatchNorm1d(200, momentum=mom)
-        self.bn_raw = nn.BatchNorm1d(200, momentum=mom)
-        self.bn_notu = nn.BatchNorm1d(200, momentum=mom)
-        self.bn_w = nn.BatchNorm1d(inp_w, momentum=mom)
-        self.bn = nn.BatchNorm1d(inp_x, momentum=mom)
-
-    def get_sizes(self, layers, out_sz):
-        return [self.n_emb + self.cont_emb_notu + self.cont_emb] + layers + [out_sz]
-
-    def forward(self, x_cat: Tensor, x_cont: Tensor) -> Tensor:
-        b_size = x_cont.size(0)
-
-        # embedding of has one feat
-        x = [self.embeds(x_cat[:, i]) for i in range(200)]
-        x = torch.stack(x, dim=1)
-
-        # embedding of intercept. It was embedding of feature id before
-        x_feat_emb = self.embeds_feat(x_cat[:, 200])
-        x_feat_emb = torch.stack([x_feat_emb] * 200, 1)
-        x_feat_emb = self.bn_feat_emb(x_feat_emb)
-        x_feat_w = self.embeds_feat_w(x_cat[:, 200])
-        x_feat_w = torch.stack([x_feat_w] * 200, 1)
-
-        # "continuous embedding" of raw features
-        x_cont_raw = x_cont[:, :200].contiguous().view(-1, 1)
-        x_cont_raw = torch.cat([x_cont_raw, x_feat_emb.view(-1, self.n_emb_feat)], 1)
-        x_cont_raw = F.relu(self.cont_emb_l(x_cont_raw))
-        x_cont_raw = self.cont_emb_l2(x_cont_raw)
-        x_cont_raw = x_cont_raw.view(b_size, 200, self.cont_emb)
-
-        # "continuous embedding" of not unique features
-        x_cont_notu = x_cont[:, 200:].contiguous().view(-1, 1)
-        x_cont_notu = torch.cat([x_cont_notu, x_feat_emb.view(-1, self.n_emb_feat)], 1)
-        x_cont_notu = F.relu(self.cont_emb_notu_l(x_cont_notu))
-        x_cont_notu = self.cont_emb_notu_l2(x_cont_notu)
-        x_cont_notu = x_cont_notu.view(b_size, 200, self.cont_emb_notu)
-
-        x_cont_notu = self.bn_notu(x_cont_notu)
-        x = self.bn_cat(x)
-        x_cont_raw = self.bn_raw(x_cont_raw)
-
-        x = self.emb_drop(x)
-        x_cont_raw = self.emb_drop(x_cont_raw)
-        x_cont_notu = self.emb_drop(x_cont_notu)
-        x_feat_w = self.bn_feat_w(x_feat_w)
-
-        # Predict a weight for each of the previous embeddings
-        x_w = torch.cat([x.view(-1, self.n_emb),
-                         x_feat_w.view(-1, self.n_emb_feat_w),
-                         x_cont_raw.view(-1, self.cont_emb),
-                         x_cont_notu.view(-1, self.cont_emb_notu)], 1)
-
-        x_w = self.bn_w(x_w)
-
-        w = F.relu(self.weight(x_w))
-        w = self.weight2(w).view(b_size, -1)
-        w = torch.nn.functional.softmax(w, dim=-1).unsqueeze(-1)
-
-        # weighted average of the differents embeddings using weights given by NN
-        x = (w * x).sum(dim=1)
-        x_cont_raw = (w * x_cont_raw).sum(dim=1)
-        x_cont_notu = (w * x_cont_notu).sum(dim=1)
-
-        # Use NN on the weighted average to predict final output
-        x = torch.cat([x, x_cont_raw, x_cont_notu], 1) if self.n_emb != 0 else x_cont
-        x = self.bn(x)
-
-        x = self.seq(x)
-        x = self.layers(x)
-        return x
-
-
-def set_seed(seed=42):
-    # python RNG
-    random.seed(seed)
-
-    # pytorch RNGs
-    import torch
-    torch.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
-    if torch.cuda.is_available(): torch.cuda.manual_seed_all(seed)
-
-    # numpy RNG
-    import numpy as np
-    np.random.seed(seed)
-
-
-ss = StandardScaler()
-
-logger.info('Input data')
-
-data = pd.read_feather('../input/create-data/921_data.fth')
-data = data.set_index('ID_code')
-
-etd = pd.read_feather('../input/create-data/921_etd.fth')
-etd = etd.set_index('ID_code')
-
-has_one = [f'var_{i}_has_one' for i in range(200)]
-orig = [f'var_{i}' for i in range(200)]
-not_u = [f'var_{i}_not_unique' for i in range(200)]
-
-cont_vars = orig + not_u
-cat_vars = has_one
-target = 'target'
-path = './'
-
-logger.info('cat treatment')
-
-for f in cat_vars:
-    data[f] = data[f].astype('category').cat.as_ordered()
-    etd[f] = pd.Categorical(etd[f], categories=data[f].cat.categories, ordered=True)
-
-# constant feature to replace feature index information
-feat = ['intercept']
-data['intercept'] = 1
-data['intercept'] = data['intercept'].astype('category')
-etd['intercept'] = 1
-etd['intercept'] = etd['intercept'].astype('category')
-
-cat_vars += feat
-
-ref = pd.concat([data[cont_vars + cat_vars + ['target']], etd[cont_vars + cat_vars]])
-ref[cont_vars] = ss.fit_transform(ref[cont_vars].values)
-
-data = ref.iloc[:200000]
-etd = ref.iloc[200000:]
-
-data[target] = data[target].astype('int')
-
-del ref;
+from sklearn.preprocessing import StandardScaler
+
+from multiprocessing import cpu_count
+from tqdm import tqdm # 进度条库
+# 1.从测试集删除fake数据——避免测试集对模型的判断干扰
+# ===== fake samples =====
+te_ = pd.read_csv('../input/test.csv.zip').drop(['ID_code'], axis=1).values
+
+unique_samples = []
+unique_count = np.zeros_like(te_)
+for feature in tqdm(range(te_.shape[1])):
+    _, index_, count_ = np.unique(te_[:, feature], return_counts=True, return_index=True)
+    unique_count[index_[count_ == 1], feature] += 1
+
+# Samples which have unique values are real the others are fake
+real_samples_indexes = np.argwhere(np.sum(unique_count, axis=1) > 0)[:, 0]
+synthetic_samples_indexes = np.argwhere(np.sum(unique_count, axis=1) == 0)[:, 0]
+
+# =============================================================================
+# setting
+# =============================================================================
+
+# parameters
+
+params = {
+    'bagging_freq': 5,
+    'bagging_fraction': 1.0,
+    'boost_from_average': 'false',
+    'boost': 'gbdt',
+    'feature_fraction': 1.0,
+    'learning_rate': 0.005,
+    'max_depth': -1,
+    'metric': 'binary_logloss',
+    'min_data_in_leaf': 30,
+    'min_sum_hessian_in_leaf': 10.0,
+    'num_leaves': 64,
+    'num_threads': cpu_count(),
+    'tree_learner': 'serial',
+    'objective': 'binary',
+    'verbosity': -1
+}
+
+NFOLD = 10
+
+NROUND = 1600
+
+SEED = np.random.randint(99999)
+np.random.seed(SEED)
+
+SUBMIT_FILE_PATH = f'../output/2nd-place-solution.csv.gz'
+
+# =============================================================================
+# drop vars
+# =============================================================================
+
+drop_vars = [7,
+             10,
+             17,
+             27,
+             29,
+             30,
+             38,
+             41,
+             46,
+             96,
+             100,
+             103,
+             126,
+             158,
+             185]
+
+var_len = 200 - len(drop_vars)
+
+# 2.concat测试集和训练集
+# =============================================================================
+# load
+# =============================================================================
+train = pd.read_csv("../input/train.csv.zip")
+test = pd.read_csv("../input/test.csv.zip").drop(synthetic_samples_indexes)
+
+X_train = train.iloc[:, 2:].values
+y_train = train.target.values
+
+X_test = test.iloc[:, 1:].values
+
+X = np.concatenate([X_train, X_test], axis=0)
+del X_train, X_test;
 gc.collect()
 
-fold_seed = 42
-ss = StratifiedKFold(n_splits=10, random_state=fold_seed, shuffle=True)
+reverse_list = [0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 15, 16, 18, 19, 22, 24, 25, 26,
+                27, 29, 32, 35, 37, 40, 41, 47, 48, 49, 51, 52, 53, 55, 60, 61,
+                62, 65, 66, 67, 69, 70, 71, 74, 78, 79, 82, 84, 89, 90, 91, 94,
+                95, 96, 97, 99, 103, 105, 106, 110, 111, 112, 118, 119, 125, 128,
+                130, 133, 134, 135, 137, 138, 140, 144, 145, 147, 151, 155, 157,
+                159, 161, 162, 163, 164, 167, 168, 170, 171, 173, 175, 176, 179,
+                180, 181, 184, 185, 187, 189, 190, 191, 195, 196, 199,
 
-folds = []
-for num, (train, test) in enumerate(ss.split(data[target], data[target])):
-    folds.append([train, test])
+                ]
+# 随机列 取反——增强数据
+for j in reverse_list:
+    X[:, j] *= -1
+# 随机列 删除——增强数据
+# drop
+X = np.delete(X, drop_vars, 1)
 
-layers = [32]
-ps = 0.2
-emb_drop = 0.08
-cont_emb = (50, 10)
-cont_emb_notu = (50, 10)
-emb_szs = [[6, 12]]
-use_bn = True
-joined = False
-# Code modified to sub with one seed
-seeds = [42]  # , 1337, 666]
+# 3.数据缩放
+# scaling
+scaler = StandardScaler()
+X = scaler.fit_transform(X)
 
-results = []
-sub_preds = pd.DataFrame(columns=range(10), index=etd.index)
-for num_fold, (train, test) in enumerate(folds):
-    procs = []
-    df = (TabularList.from_df(data, path=path, cat_names=cat_vars, cont_names=cont_vars, procs=procs)
-          .split_by_idx(test)
-          .label_from_df(cols=target)
-          .add_test(TabularList.from_df(etd, path=path, cat_names=cat_vars, cont_names=cont_vars, procs=procs))
-          .databunch(num_workers=0, bs=1024))
+# 4.计数编码——用类别出现的次数代表该类别
+# count encoding
+X_cnt = np.zeros((len(X), var_len * 4))
+# 5.将不同精度的数据进行复制，然后进行 技术编码，本质上是将数据放到一个 范围 区间，然后 进行统计归类
+for j in tqdm(range(var_len)):
+    for i in range(1, 4):
+        x = np.round(X[:, j], i + 1)
+        dic = pd.value_counts(x).to_dict()
+        X_cnt[:, i + j * 4] = pd.Series(x).map(dic)
+    x = X[:, j]
+    dic = pd.value_counts(x).to_dict()
+    X_cnt[:, j * 4] = pd.Series(x).map(dic)
 
-    df.dls[0].dl = df.dls[0].new(sampler=LongerRandomSampler(data_source=df.train_ds, mult=2), shuffle=False).dl
-    for num_seed, seed in enumerate(seeds):
-        logger.info(f'Model {num_fold} seed {num_seed}')
-        set_seed(seed)
-        model = my_TabularModel(emb_szs, len(df.cont_names), out_sz=df.c, layers=layers, ps=ps, emb_drop=emb_drop,
-                                y_range=None, use_bn=use_bn, cont_emb=cont_emb, cont_emb_notu=cont_emb_notu)
+# raw + count feature
+X_raw = X.copy()  # rename for readable
+del X;
+gc.collect()
+# 将缩放后的训练集与技术编码后的数据concat
+X = np.zeros((len(X_raw), var_len * 5))
+for j in tqdm(range(var_len)):
+    X[:, 5 * j + 1:5 * j + 5] = X_cnt[:, 4 * j:4 * j + 4]
+    X[:, 5 * j] = X_raw[:, j]
 
-        learn = Learner(df, model, metrics=None, callback_fns=AUROC, wd=0.1)
-        learn.fit_one_cycle(15, max_lr=1e-2, callbacks=[SaveModelCallback(learn, every='improvement', monitor='AUROC',
-                                                                          name=f'fold{fold_seed}_{num_fold}_seed_{seed}'),
-                                                        AugShuffCallback(learn)])
-        pred, _ = learn.get_preds()
-        pred = pred[:, 1]
+# 6.取消透视所有列
+# 此前，X为一个[400k , var_len * 5] 的数据集，将X按5位步长截取为 [200k, 5] * var_len 份数据集，其中每份都映射 训练集 的 label, 最后是 [200k * var_len, 6] 的矩阵
+# treat each var as same
+X_train_concat = np.concatenate([
+    np.concatenate([
+        X[:200000, 5 * cnum:5 * cnum + 5],
+        np.ones((len(y_train), 1)).astype("int") * cnum
+    ], axis=1) for cnum in range(var_len)], axis=0)
+y_train_concat = np.concatenate([y_train for cnum in range(var_len)], axis=0)
 
-        pred_test, _ = learn.get_preds(DatasetType.Test)
-        pred_test = pred_test[:, 1]
+# 7.开始训练和预测
+# =============================================================================
+# stratified
+# =============================================================================
+train_group = np.arange(len(X_train_concat)) % 200000
 
-        sub_preds.loc[:, num_fold] = pred_test
-        results.append(np.max(learn.recorder.metrics))
-        logger.info('result ' + str(results[-1]))
+id_y = pd.DataFrame(zip(train_group, y_train_concat),
+                    columns=['id', 'y'])
 
-        np.save(f'oof_fold{fold_seed}_{num_fold}_seed_{seed}.npy', pred)
-        np.save(f'test_fold{fold_seed}_{num_fold}_seed_{seed}.npy', pred_test)
+id_y_uq = id_y.drop_duplicates('id').reset_index(drop=True)
 
-        del learn, pred, model, pred_test;
-        gc.collect()
-    del df;
-    gc.collect()
-print(results)
-print(np.mean(results))
 
-sub_preds[target] = sub_preds.rank().mean(axis=1)
-sub_preds[[target]].to_csv('submission_NN_wo_pseudo_seed42.csv', index_label='ID_code')
+def stratified(nfold=5):
+    id_y_uq0 = id_y_uq[id_y_uq.y == 0].sample(frac=1)
+    id_y_uq1 = id_y_uq[id_y_uq.y == 1].sample(frac=1)
+
+    id_y_uq0['g'] = [i % nfold for i in range(len(id_y_uq0))]
+    id_y_uq1['g'] = [i % nfold for i in range(len(id_y_uq1))]
+    id_y_uq_ = pd.concat([id_y_uq0, id_y_uq1])
+
+    id_y_ = pd.merge(id_y[['id']], id_y_uq_, how='left', on='id')
+
+    train_idx_list = []
+    valid_idx_list = []
+    for i in range(nfold):
+        train_idx = id_y_[id_y_.g != i].index
+        train_idx_list.append(train_idx)
+        valid_idx = id_y_[id_y_.g == i].index
+        valid_idx_list.append(valid_idx)
+
+    return train_idx_list, valid_idx_list
+
+
+train_idx_list, valid_idx_list = stratified(NFOLD)
+
+# =============================================================================
+# train
+# =============================================================================
+
+models = []
+oof = np.zeros(len(id_y))
+p_test_all = np.zeros((100000, var_len, NFOLD))
+id_y['var'] = np.concatenate([np.ones(200000) * i for i in range(var_len)])
+
+for i in range(NFOLD):
+
+    print(f'building {i}...')
+
+    train_idx = train_idx_list[i]
+    valid_idx = valid_idx_list[i]
+
+    # train
+    X_train_cv = X_train_concat[train_idx]
+    y_train_cv = y_train_concat[train_idx]
+
+    # valid
+    X_valid = X_train_concat[valid_idx]
+
+    # test
+    X_test = np.concatenate([
+        np.concatenate([
+            X[200000:, 5 * cnum:5 * cnum + 5],
+            np.ones((100000, 1)).astype("int") * cnum
+        ], axis=1) for cnum in range(var_len)], axis=0
+    )
+
+    dtrain = lgb.Dataset(
+        X_train_cv, y_train_cv,
+        feature_name=['value', 'count_org', 'count_2', 'count_3', 'count_4', 'varnum'],
+        categorical_feature=['varnum'], free_raw_data=False
+    )
+    model = lgb.train(params, train_set=dtrain, num_boost_round=NROUND, verbose_eval=100)
+    l = valid_idx.shape[0]
+
+    p_valid = model.predict(X_valid)
+    p_test = model.predict(X_test)
+    for j in range(var_len):
+        oof[valid_idx] = p_valid
+        p_test_all[:, j, i] = p_test[j * 100000:(j + 1) * 100000]
+
+    models.append(model)
+
+# =============================================================================
+# test
+# =============================================================================
+id_y['pred'] = oof
+oof = pd.pivot_table(id_y, index='id', columns='var', values='pred').values
+
+p_test_mean = p_test_all.mean(axis=2)
+
+p_test_odds = np.ones(100000) * 1 / 9
+for j in range(var_len):
+    if roc_auc_score(y_train, oof[:, j]) >= 0.500:
+        p_test_odds *= (9 * p_test_mean[:, j] / (1 - p_test_mean[:, j]))
+
+p_test_odds = p_test_odds / (1 + p_test_odds)
+
+sub1 = pd.read_csv("../input/sample_submission.csv.zip")
+sub2 = pd.DataFrame({"ID_code": test.ID_code.values, "target": p_test_odds})
+sub = pd.merge(sub1[["ID_code"]], sub2, how="left").fillna(0)
+
+# save
+sub.to_csv(SUBMIT_FILE_PATH, index=False, compression='gzip')
+
+# ==============================================================================

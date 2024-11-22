@@ -62,7 +62,7 @@ def read_init_model(file_name: string) -> keras.src.models.sequential.Sequential
 
 
 # nn 定义一个全连接神经网络
-def nn(train_d, train_l, test_d: pd.DataFrame):
+def nn(train_d, train_l: pd.DataFrame):
     callback = tf.keras.callbacks.LambdaCallback(on_epoch_end=lambda batch, logs: [callback.on_train_begin])
     # 1.建立全连接神经网络
     model = read_init_model('my_model.keras')
@@ -106,7 +106,7 @@ def main():
     train_data, test_data = read_data()
     # 2.整理字段
     train_d, train_l, test_d, test_l = pd_to_np(train_data, test_data)
-    nn(train_d, train_l, test_data)
+    nn(train_d, train_l)
     # predict_test_data(test_d, test_l)
 
 
