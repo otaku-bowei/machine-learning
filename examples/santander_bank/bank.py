@@ -1,30 +1,45 @@
 import re
 import string
 import datetime
+
+import keras as keras
 import numpy as np
 import pandas as pd
 import sklearn.linear_model
 import tensorflow as tf
-import keras
 from datashader import Pipeline
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.linear_model import LinearRegression
+from tqdm import tqdm
 
 import tool.tensorboard.tensor_board as tb
+
+
+# unqTestData
+def unqTestData():
+    te_ = pd.read_csv('./test.csv.zip').drop(['ID_code'], axis=1).values
+    unique_count = np.zeros_like(te_)
+    for feature in tqdm(range(te_.shape[1])):
+        _, index_, count_ = np.unique(te_[:, feature], return_counts=True, return_index=True)
+        unique_count[index_[count_ == 1], feature] += 1
+    real_samples_indexes = np.argwhere(np.sum(unique_count, axis=1) > 0)[:, 0]
+    synthetic_samples_indexes = np.argwhere(np.sum(unique_count, axis=1) == 0)[:, 0]
+    test = pd.read_csv("./test.csv.zip").drop(synthetic_samples_indexes)
+    return test
 
 
 # read_data
 def read_data():
     # 读取文件
     train_data = pd.read_csv(".\\train.csv")
-    test_data = pd.read_csv(".\\test.csv")
+    test_data = unqTestData()
     pd.set_option('display.max_rows', None)
     pd.set_option('display.max_columns', None)
     print(train_data.describe())
     # 数据统计展示
     # train_data.describe().to_csv('train_des.csv', index=False)
     # test_data.describe().to_csv('test_des.csv', index=False)
-    return train_data, test_data
+    return train_data.iloc[:50000, :], test_data
 
 
 # pd_to_np pd格式转换为np格式

@@ -152,7 +152,32 @@ def test():
             np.ones((len(y_train), 1)).astype("int") * cnum
         ], axis=1) for cnum in range(var_len)], axis=0)
     y_train_concat = np.concatenate([y_train for cnum in range(var_len)], axis=0)
+    train_group = np.arange(len(X_train_concat)) % 200000
 
-    # 输出透视后的结果
-    print(X_train_concat[0:5, :])
-    print(y_train_concat[0:5, :])
+    id_y = pd.DataFrame(zip(train_group, y_train_concat),
+                        columns=['id', 'y'])
+
+    id_y_uq = id_y.drop_duplicates('id').reset_index(drop=True)
+
+    def stratified(nfold=5):
+        id_y_uq0 = id_y_uq[id_y_uq.y == 0].sample(frac=1)
+        id_y_uq1 = id_y_uq[id_y_uq.y == 1].sample(frac=1)
+
+        id_y_uq0['g'] = [i % nfold for i in range(len(id_y_uq0))]
+        id_y_uq1['g'] = [i % nfold for i in range(len(id_y_uq1))]
+        id_y_uq_ = pd.concat([id_y_uq0, id_y_uq1])
+
+        id_y_ = pd.merge(id_y[['id']], id_y_uq_, how='left', on='id')
+
+        train_idx_list = []
+        valid_idx_list = []
+        for i in range(nfold):
+            train_idx = id_y_[id_y_.g != i].index
+            train_idx_list.append(train_idx)
+            valid_idx = id_y_[id_y_.g == i].index
+            valid_idx_list.append(valid_idx)
+
+        return train_idx_list, valid_idx_list
+
+    train_idx_list, valid_idx_list = stratified(NFOLD)
+    print("")

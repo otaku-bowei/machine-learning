@@ -165,7 +165,7 @@ X_train_concat = np.concatenate([
     ], axis=1) for cnum in range(var_len)], axis=0)
 y_train_concat = np.concatenate([y_train for cnum in range(var_len)], axis=0)
 
-# 7.开始训练和预测
+# 将数据分为训练集和测试集
 # =============================================================================
 # stratified
 # =============================================================================
@@ -176,8 +176,9 @@ id_y = pd.DataFrame(zip(train_group, y_train_concat),
 
 id_y_uq = id_y.drop_duplicates('id').reset_index(drop=True)
 
-
+# 分层抽样，划分多个训练集和验证集
 def stratified(nfold=5):
+    # 根据结果区分，打乱
     id_y_uq0 = id_y_uq[id_y_uq.y == 0].sample(frac=1)
     id_y_uq1 = id_y_uq[id_y_uq.y == 1].sample(frac=1)
 
@@ -199,7 +200,7 @@ def stratified(nfold=5):
 
 
 train_idx_list, valid_idx_list = stratified(NFOLD)
-
+# 7.开始训练和预测
 # =============================================================================
 # train
 # =============================================================================
@@ -208,7 +209,7 @@ models = []
 oof = np.zeros(len(id_y))
 p_test_all = np.zeros((100000, var_len, NFOLD))
 id_y['var'] = np.concatenate([np.ones(200000) * i for i in range(var_len)])
-
+# echo = 10，循环训练十次
 for i in range(NFOLD):
 
     print(f'building {i}...')
