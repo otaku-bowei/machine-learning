@@ -43,4 +43,4 @@ Gitee 是 OSCHINA 推出的基于 Git 的代码托管平台（同时支持 SVN�
 1.  二手车价格评估回归 https://www.kaggle.com/competitions/playground-series-s4e9/overview
 2.  高脂肪风险多分类问题 https://www.kaggle.com/competitions/playground-series-s4e2
 3.  桑坦德银行二分类问题 https://www.kaggle.com/competitions/santander-customer-transaction-prediction
-4. 
+4.  Jane Street比赛 https://www.kaggle.com/competitions/jane-street-real-time-market-data-forecasting

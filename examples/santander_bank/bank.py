@@ -2,13 +2,13 @@ import re
 import string
 import datetime
 
-import keras as keras
+import keras
 import numpy as np
 import pandas as pd
 import sklearn.linear_model
 import tensorflow as tf
 from datashader import Pipeline
-from sklearn.preprocessing import PolynomialFeatures
+from sklearn.preprocessing import PolynomialFeatures, StandardScaler
 from sklearn.linear_model import LinearRegression
 from tqdm import tqdm
 
@@ -45,13 +45,21 @@ def read_data():
 # pd_to_np pd格式转换为np格式
 def pd_to_np(train_data, test_data: pd.DataFrame):
     # 乱序
-    train_data = train_data.sample(frac=1).reset_index(drop=True)
-    test_data = test_data.sample(frac=1).reset_index(drop=True)
+    # train_data = train_data.sample(frac=1).reset_index(drop=True)
+    # test_data = test_data.sample(frac=1).reset_index(drop=True)
     train_data = train_data.drop('ID_code', axis=1)
     train_data_tmp = train_data.loc[:, train_data.columns != 'target']
     train_label_tmp = train_data.loc[:, train_data.columns == 'target']
+    train_label_tmp[train_data.target == 1] = 0.99
     test_data_tmp = test_data.loc[:, test_data.columns != 'ID_code']
     test_label_tmp = test_data.loc[:, test_data.columns == 'ID_code']
+    # concat
+    # X = pd.concat([train_data_tmp, test_data_tmp], axis=0)
+    # # 3.归一化
+    # scaler = StandardScaler()
+    # X = scaler.fit_transform(X)
+    # train_data_tmp = pd.DataFrame(X).iloc[:50000, :]
+    # test_data_tmp = pd.DataFrame(X).iloc[50000:, :]
     return train_data_tmp.to_numpy(), train_label_tmp.to_numpy(), test_data_tmp.to_numpy(), test_label_tmp.to_numpy()
 
 
@@ -68,6 +76,7 @@ def read_init_model(file_name: string) -> keras.src.models.sequential.Sequential
             tf.keras.layers.Dense(256, activation='relu'),
             # tf.keras.layers.Dense(64, activation='relu'),
             # tf.keras.layers.Dense(128, activation='relu', kernel_regularizer=0.01),
+            tf.keras.layers.Dense(512, activation='relu'),
             tf.keras.layers.Dense(16, activation='relu'),
             tf.keras.layers.Dense(1, activation='sigmoid')
         ])
