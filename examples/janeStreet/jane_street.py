@@ -2,9 +2,11 @@ import string
 from abc import ABC
 
 import keras
+import os
 import numpy as np
 import pandas as pd
 import pyarrow as pa
+import polars as pl
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 import pyarrow.parquet as pq
@@ -40,6 +42,47 @@ import tool.tensorboard.tensor_board as tb
 '''
 
 
+lags_ : pl.DataFrame | None = None
+
+
+# Replace this function with your inference code.
+# You can return either a Pandas or Polars dataframe, though Polars is recommended.
+# Each batch of predictions (except the very first) must be returned within 1 minute of the batch features being provided.
+def predict(test: pl.DataFrame, lags: pl.DataFrame | None) -> pl.DataFrame | pd.DataFrame:
+    """Make a prediction."""
+    # All the responders from the previous day are passed in at time_id == 0. We save them in a global variable for access at every time_id.
+    # Use them as extra features, if you like.
+    global lags_
+    if lags is not None:
+        lags_ = lags
+    # Replace this section with your own predictions
+    predictions = test.select(
+        'row_id',
+        pl.lit(0.0).alias('responder_6'),
+    )
+    if isinstance(predictions, pl.DataFrame):
+        assert predictions.columns == ['row_id', 'responder_6']
+    elif isinstance(predictions, pd.DataFrame):
+        assert (predictions.columns == ['row_id', 'responder_6']).all()
+    else:
+        raise TypeError('The predict function must return a DataFrame')
+    # Confirm has as many rows as the test data.
+    assert len(predictions) == len(test)
+    return predictions
+
+
+inference_server = kaggle_evaluation.jane_street_inference_server.JSInferenceServer(predict)
+
+if os.getenv('KAGGLE_IS_COMPETITION_RERUN'):
+    inference_server.serve()
+else:
+    inference_server.run_local_gateway(
+        (
+            '/kaggle/input/jane-street-real-time-market-data-forecasting/test.parquet',
+            '/kaggle/input/jane-street-real-time-market-data-forecasting/lags.parquet',
+        )
+    )
+
 # read_org_data 读取数据
 def read_org_data():
     train_date_0_path = "C:\Program Files\BusinessFile\新手村\AI培训资料\数据集\Jane Street\\train.parquet\partition_id=0\part-0.parquet"
@@ -64,6 +107,14 @@ def read_org_data():
 def read_deal_data(name : string):
     train_data_1 = pd.read_parquet(name)
     return train_data_1
+
+
+# read_test_data 读取测试数据
+def read_test_data(name : string):
+    test = pd.read_parquet(name)
+    test_label = test.iloc[:, 0]
+    test_data = test.iloc[:, 1:]
+    return test_label, test_data
 
 
 # deal_data 对数据进行预处理≈1h
@@ -200,19 +251,33 @@ def train(train_data : pd.DataFrame):
     nn(train_data, train_label)
 
 
+# predict_test_data 预测测试集
+def predict_test_data(test_data, test_lable: pd.DataFrame):
+    model = tf.keras.models.load_model('my_model.keras')
+    pre = model.predict(test_data)
+    # test_l = tf.reshape(tf.convert_to_tensor(test_l[:, 0:]), [len(test_l), 1])
+    # pre = tf.reshape(tf.convert_to_tensor(pre[:, 0:]), [len(pre), 1])
+    pre = np.round(pre).astype(float)
+    response6 = pre[:, 5]
+    result = np.column_stack((test_lable.astype(int), response6))
+    output = pd.DataFrame(result, columns=['row_id', 'responder_6'])
+    output.to_csv('submission.csv', index=False)
+
+
 # main 主函数
 def main():
     # 1.pd读取数据集，提取相关有用信息并做数据预处理
     # train_data, lag_data, test_data = read_org_data()
     # deal_data(train_data, 'deal_train_data_0.parquet', 3)
-    train_data = read_deal_data('deal_train_data.parquet')
+    # train_data = read_deal_data('deal_train_data.parquet')
     # test = read_deal_data('deal_test_data.parquet')
     # pd.set_option('display.max_rows', None)
     # pd.set_option('display.max_columns', None)
     # print(train.describe())
     # print(test.describe())
-    train(train_data)
-
+    # train(train_data)
+    test_label, test_data = read_test_data('deal_test_data.parquet')
+    predict_test_data(test_data, test_label)
 
 if __name__ == "__main__":
     main()
