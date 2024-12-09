@@ -4,13 +4,18 @@ import pandas as pd
 import polars as pl
 import numpy as np
 import os
+from river import neighbors
+from river import metrics
 from pathlib import Path
+import river
+
 
 # Visualization imports
 import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
 import tensorflow as tf
+import tensorflow_decision_forests as tfd
 
 # Gather the train data partitions
 DATA_DIR = Path('/kaggle/input/jane-street-real-time-market-data-forecasting')
@@ -23,11 +28,13 @@ test_parquets = [f"{DATA_DIR}/test.parquet/date_id={i}/part-0.parquet" for i in 
 # Load a subset of the data, you can choose any partition or multiple
 # df = pd.read_parquet(train_parquets[6])
 
-def read_org_data():
-    train_ds = pd.read_parquet(train_parquets[6])
-    test_ds = pd.read_parquet(test_parquets[0])
-    return train_ds, test_ds
+def read_org_train_data(i : int):
+    train_ds = pd.read_parquet(train_parquets[i])
+    return train_ds
 
+def read_org_test_data():
+    test_ds = pd.read_parquet(test_parquets[0])
+    return test_ds
 
 def deal_data(train_ds, test_ds: pd.DataFrame):
     # 1.填充空值，添加相关指示值
@@ -36,6 +43,38 @@ def deal_data(train_ds, test_ds: pd.DataFrame):
     test_data = test_ds.drop(columns=['is_scored'])
     return train_data, test_data
 
+# part_data 将每个训练集合切片，并保留交叉校验集合
+def read_part_data(train_ds : pd.DataFrame):
+    train_pd = train_ds.groupby('date_id')
+    return train_pd
+
+def online_learning(train_d : pd.DataFrame, model : neighbors.KNNRegressor() = None):
+    if model is None:
+        model = neighbors.KNNRegressor()
+    cost = metrics.MAE()
+    train_part_data = read_part_data(train_d)
+    sorted_groups = sorted(train_part_data.groups.keys())
+    for date_id in tqdm(sorted_groups):
+        train_d_tmp = train_part_data.get_group(date_id)
+        # 训练数据每次用5条来进行学习
+        # print(train_d_tmp.head())
+        # print(date_id)
+        # 对数据进行区分
+        train_data = train_d_tmp.drop(
+            columns=['date_id', 'time_id', 'symbol_id', 'responder_0', 'responder_1', 'responder_2', 'responder_3', 'responder_4', 'responder_5',
+                     'responder_6', 'responder_7', 'responder_8'])
+        train_label = train_d_tmp.loc[:, ['responder_6']]
+        # 训练集逐一训练更新
+        length = len(train_data)
+        for i in tqdm(range(0, length)):
+            d, l = train_data.iloc[i:i+1], train_label[i:i+1]
+            d_dict = d.loc[i].to_dict()
+            l_num = l.iloc[0, l.columns.get_loc('responder_6')]
+            weight = d.iloc[0, d.columns.get_loc('weight')]
+            y_pred = model.predict_one(d_dict)
+            model.learn_one(d_dict, l_num)
+            cost.update(l_num, y_pred, weight)
+        print(cost)
 
 def nn(train_d, train_l: pd.DataFrame):
     callback = tf.keras.callbacks.LambdaCallback(on_epoch_end=lambda batch, logs: [callback.on_train_begin])
@@ -103,7 +142,7 @@ else:
         )
     )
 
-train_data, test_data = read_org_data()
+train_data, test_data = read_org_train_data()
 
 train_data, test_data = deal_data(train_data, test_data)
 

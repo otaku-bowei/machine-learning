@@ -9,6 +9,8 @@ from pathlib import Path
 # Visualization imports
 import matplotlib.pyplot as plt
 import seaborn as sns
+from river import neighbors
+from river import metrics
 from tqdm import tqdm
 import tensorflow as tf
 
@@ -39,8 +41,8 @@ def read_org_data_tmp():
     train_data_1 = pd.read_parquet(train_date_1_path)
     lags = pd.read_parquet(lags_path)
     test_data = pd.read_parquet(test_path)
-    pd.set_option('display.max_rows', None)
-    pd.set_option('display.max_columns', None)
+    # pd.set_option('display.max_rows', None)
+    # pd.set_option('display.max_columns', None)
     # print(train_data_0.head())
     # print(train_data_1.head())
     # print(lags.head())
@@ -55,6 +57,40 @@ def deal_data(train_ds, test_ds: pd.DataFrame):
     test_ds = test_ds.drop(columns=['symbol_id'])
     test_data = test_ds.drop(columns=['is_scored'])
     return train_data, test_data
+
+# part_data 将每个训练集合切片，并保留交叉校验集合
+def read_part_data(train_ds : pd.DataFrame):
+    train_pd = train_ds.groupby('date_id')
+    return train_pd
+
+
+def online_learning(train_d : pd.DataFrame, model : neighbors.KNNRegressor() = None):
+    if model is None:
+        model = neighbors.KNNRegressor()
+    cost = metrics.MAE()
+    train_part_data = read_part_data(train_d)
+    sorted_groups = sorted(train_part_data.groups.keys())
+    for date_id in tqdm(sorted_groups):
+        train_d_tmp = train_part_data.get_group(date_id)
+        # 训练数据每次用5条来进行学习
+        # print(train_d_tmp.head())
+        # print(date_id)
+        # 对数据进行区分
+        train_data = train_d_tmp.drop(
+            columns=['date_id', 'time_id', 'symbol_id', 'responder_0', 'responder_1', 'responder_2', 'responder_3', 'responder_4', 'responder_5',
+                     'responder_6', 'responder_7', 'responder_8'])
+        train_label = train_d_tmp.loc[:, ['responder_6']]
+        # 训练集逐一训练更新
+        length = len(train_data)
+        for i in tqdm(range(0, length)):
+            d, l = train_data.iloc[i:i+1], train_label[i:i+1]
+            d_dict = d.loc[i].to_dict()
+            l_num = l.iloc[0, l.columns.get_loc('responder_6')]
+            weight = d.iloc[0, d.columns.get_loc('weight')]
+            y_pred = model.predict_one(d_dict)
+            model.learn_one(d_dict, l_num)
+            cost.update(l_num, y_pred, weight)
+        print(cost)
 
 
 def nn(train_d, train_l: pd.DataFrame):
@@ -217,27 +253,27 @@ def predict(test: pl.DataFrame, lags: pl.DataFrame | None) -> pl.DataFrame | pd.
 
 def main():
     train_data, test_data = read_org_data_tmp()
-    print(test_data.head())
-    train_data, test_data = deal_data(train_data, test_data)
+    # print(test_data.head())
+    # train_data, test_data = deal_data(train_data, test_data)
 
-    train_d = train_data.drop(
-        columns=['responder_0', 'responder_1', 'responder_2', 'responder_3', 'responder_4', 'responder_5',
-                 'responder_6', 'responder_7', 'responder_8'])
-    train_l = train_data.loc[:,
-              ['responder_0', 'responder_1', 'responder_2', 'responder_3', 'responder_4', 'responder_5', 'responder_6',
-               'responder_7', 'responder_8']]
-    model = nn(train_d, train_l)
-
-    test_d = test_data.drop(columns=['row_id'])
-    test_result = model.predict(test_d)
-    tr = pd.DataFrame(test_result,
-                      columns=['responder_0', 'responder_1', 'responder_2', 'responder_3', 'responder_4', 'responder_5',
-                               'responder_6',
-                               'responder_7', 'responder_8'])
-    tr = pd.concat((test_data, tr), axis=1)
-    output = predict(pl.from_pandas(tr), None).to_pandas()
-    output.to_csv('submission.csv', index=False)
-
+    # train_d = train_data.drop(
+    #     columns=['responder_0', 'responder_1', 'responder_2', 'responder_3', 'responder_4', 'responder_5',
+    #              'responder_6', 'responder_7', 'responder_8'])
+    # train_l = train_data.loc[:,
+    #           ['responder_0', 'responder_1', 'responder_2', 'responder_3', 'responder_4', 'responder_5', 'responder_6',
+    #            'responder_7', 'responder_8']]
+    # model = nn(train_d, train_l)
+    #
+    # test_d = test_data.drop(columns=['row_id'])
+    # test_result = model.predict(test_d)
+    # tr = pd.DataFrame(test_result,
+    #                   columns=['responder_0', 'responder_1', 'responder_2', 'responder_3', 'responder_4', 'responder_5',
+    #                            'responder_6',
+    #                            'responder_7', 'responder_8'])
+    # tr = pd.concat((test_data, tr), axis=1)
+    # output = predict(pl.from_pandas(tr), None).to_pandas()
+    # output.to_csv('submission.csv', index=False)
+    online_learning(train_data)
 
 if __name__ == '__main__':
     main()
