@@ -71,17 +71,11 @@ def predict(test: pl.DataFrame, lags: pl.DataFrame | None) -> pl.DataFrame | pd.
     return predictions
 
 
-inference_server = kaggle_evaluation.jane_street_inference_server.JSInferenceServer(predict)
 
-if os.getenv('KAGGLE_IS_COMPETITION_RERUN'):
-    inference_server.serve()
-else:
-    inference_server.run_local_gateway(
-        (
-            '/kaggle/input/jane-street-real-time-market-data-forecasting/test.parquet',
-            '/kaggle/input/jane-street-real-time-market-data-forecasting/lags.parquet',
-        )
-    )
+def read_lags_data():
+    lags_path = "C:\Program Files\BusinessFile\新手村\AI培训资料\数据集\Jane Street\lags.parquet\date_id=0\part-0.parquet"
+    lags = pd.read_parquet(lags_path)
+    lags.to_csv('lags.csv')
 
 # read_org_data 读取数据
 def read_org_data():
@@ -200,55 +194,55 @@ class Cost(tf.keras.losses.Loss):
 
 
 # read_init_model 读取模型，否则初始化模型
-def read_init_model(file_name: string) -> keras.src.models.sequential.Sequential:
-    model = {}
-    try:
-        model = tf.keras.models.load_model(file_name)
-    except Exception as e:
-        model = tf.keras.models.Sequential([
-            tf.keras.layers.Dense(256, activation='relu'),
-            tf.keras.layers.Dense(128, activation='relu'),
-            # tf.keras.layers.Dropout(0.2),
-            # 此处激活函数帮我跳出了局部最小值，线性激活函数输出的是z1-z6,用softmax才会输出概率值
-            tf.keras.layers.Dense(9, activation='relu')
-        ])
-    finally:
-        return model
+# def read_init_model(file_name: string) -> keras.src.models.sequential.Sequential:
+#     model = {}
+#     try:
+#         model = tf.keras.models.load_model(file_name)
+#     except Exception as e:
+#         model = tf.keras.models.Sequential([
+#             tf.keras.layers.Dense(256, activation='relu'),
+#             tf.keras.layers.Dense(128, activation='relu'),
+#             # tf.keras.layers.Dropout(0.2),
+#             # 此处激活函数帮我跳出了局部最小值，线性激活函数输出的是z1-z6,用softmax才会输出概率值
+#             tf.keras.layers.Dense(9, activation='relu')
+#         ])
+#     finally:
+#         return model
 
 
 # nn 定义一个全连接神经网络
-def nn(train_d, train_l: pd.DataFrame):
-    callback = tf.keras.callbacks.LambdaCallback(on_epoch_end=lambda batch, logs: [callback.on_train_begin])
-    # 1.建立全连接神经网络
-    model = read_init_model('my_model_self_cost.keras')
-    # 2.调整数据格式
-    train_data = train_d.astype(np.float64)
-    train_label = train_l.astype(np.float64)
-    # 4.1定义损失函数--得分损失函数,用均方误差作为反向传播基准
-    loss_fn = Cost(weights=train_data['weights'])
-    # loss_fn = tf.keras.losses.MeanSquaredError()
-    model.compile(optimizer='adam', loss=loss_fn, metrics=['mae'])
-    # 4.2定义tensorBoard
-    tensorboard_callback = tb.draw_board('jane_street')
-    # 5.进行训练
-    """
-    1.mae损失函数，简单的nn，mae≈5.8，loss≈9.4
-    2.根据得分函数自定义损失函数，nn不变，
-    """
-    train_history = model.fit(train_data, train_label, epochs=10, callbacks=[tensorboard_callback])
-    # 6.保存模型
-    model.save('my_model.keras')
+# def nn(train_d, train_l: pd.DataFrame):
+#     callback = tf.keras.callbacks.LambdaCallback(on_epoch_end=lambda batch, logs: [callback.on_train_begin])
+#     # 1.建立全连接神经网络
+#     model = read_init_model('my_model_self_cost.keras')
+#     # 2.调整数据格式
+#     train_data = train_d.astype(np.float64)
+#     train_label = train_l.astype(np.float64)
+#     # 4.1定义损失函数--得分损失函数,用均方误差作为反向传播基准
+#     loss_fn = Cost(weights=train_data['weights'])
+#     # loss_fn = tf.keras.losses.MeanSquaredError()
+#     model.compile(optimizer='adam', loss=loss_fn, metrics=['mae'])
+#     # 4.2定义tensorBoard
+#     tensorboard_callback = tb.draw_board('jane_street')
+#     # 5.进行训练
+#     """
+#     1.mae损失函数，简单的nn，mae≈5.8，loss≈9.4
+#     2.根据得分函数自定义损失函数，nn不变，
+#     """
+#     train_history = model.fit(train_data, train_label, epochs=10, callbacks=[tensorboard_callback])
+#     # 6.保存模型
+#     model.save('my_model.keras')
 
 
 # train 开始训练
-def train(train_data : pd.DataFrame):
-    # 第二列为权重
-    pd.set_option('display.max_rows', None)
-    pd.set_option('display.max_columns', None)
-    train_label = train_data.iloc[:, -9:]
-    train_data = train_data.iloc[:, :161]
-    train_data = train_data.rename(columns={2:'weights'})
-    nn(train_data, train_label)
+# def train(train_data : pd.DataFrame):
+#     # 第二列为权重
+#     pd.set_option('display.max_rows', None)
+#     pd.set_option('display.max_columns', None)
+#     train_label = train_data.iloc[:, -9:]
+#     train_data = train_data.iloc[:, :161]
+#     train_data = train_data.rename(columns={2:'weights'})
+#     nn(train_data, train_label)
 
 
 # predict_test_data 预测测试集
@@ -267,7 +261,7 @@ def predict_test_data(test_data, test_lable: pd.DataFrame):
 # main 主函数
 def main():
     # 1.pd读取数据集，提取相关有用信息并做数据预处理
-    # train_data, lag_data, test_data = read_org_data()
+    read_lags_data()
     # deal_data(train_data, 'deal_train_data_0.parquet', 3)
     # train_data = read_deal_data('deal_train_data.parquet')
     # test = read_deal_data('deal_test_data.parquet')
@@ -276,8 +270,9 @@ def main():
     # print(train.describe())
     # print(test.describe())
     # train(train_data)
-    test_label, test_data = read_test_data('deal_test_data.parquet')
-    predict_test_data(test_data, test_label)
+    # test_label, test_data = read_test_data('deal_test_data.parquet')
+    # predict_test_data(test_data, test_label)
+
 
 if __name__ == "__main__":
     main()

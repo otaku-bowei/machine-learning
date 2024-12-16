@@ -9,8 +9,7 @@ from pathlib import Path
 # Visualization imports
 import matplotlib.pyplot as plt
 import seaborn as sns
-from river import neighbors
-from river import metrics
+from sklearn.linear_model import SGDRegressor
 from tqdm import tqdm
 import tensorflow as tf
 
@@ -43,33 +42,49 @@ def read_org_data_tmp():
     test_data = pd.read_parquet(test_path)
     # pd.set_option('display.max_rows', None)
     # pd.set_option('display.max_columns', None)
-    # print(train_data_0.head())
+    # print(train_data_0.describe())
     # print(train_data_1.head())
     # print(lags.head())
     # print(test_data.head())
     # return pd.concat([train_data_0, train_data_1], axis=0), lags_path, test_data
-    return pd.concat((train_data_0, train_data_1)), test_data
+    # return pd.concat((train_data_0, train_data_1)), test_data
+    return train_data_0, test_data
 
+def read_lags_data():
+    lags_path = "C:\Program Files\BusinessFile\新手村\AI培训资料\数据集\Jane Street\lags.parquet\date_id=0\part-0.parquet"
+    lags = pd.read_parquet(lags_path)
+    return lags
 
-def deal_data(train_ds, test_ds: pd.DataFrame):
+def deal_data(data : pd.DataFrame):
     # 1.填充空值，添加相关指示值
-    train_data = train_ds.drop(columns=['symbol_id'])
-    test_ds = test_ds.drop(columns=['symbol_id'])
-    test_data = test_ds.drop(columns=['is_scored'])
-    return train_data, test_data
+    # 使用isna()方法检查NaN值，并将结果转换为整数（True变为1，False变为0）
+    nan_flags = data.isna().astype(int)
+    # 为了区分原DataFrame和NaN标志DataFrame，可以给后者添加后缀
+    nan_flags.columns = [col + '_NaN_flag' for col in data.columns]
+    # 将NaN标志列添加到原DataFrame中
+    data = pd.concat([data, nan_flags], axis=1)
+    # data = data.fillna(0.0)
+    return data
 
 # part_data 将每个训练集合切片，并保留交叉校验集合
 def read_part_data(train_ds : pd.DataFrame):
     train_pd = train_ds.groupby('date_id')
     return train_pd
 
+def read_part_data_by_symbol_id(train_ds : pd.DataFrame, chunk_size : int):
+    train_pd = train_ds.groupby('date_id')
+    return train_pd
 
-def online_learning(train_d : pd.DataFrame, model : neighbors.KNNRegressor() = None):
+
+
+
+def online_learning(train_d : pd.DataFrame, model : SGDRegressor() = None):
     if model is None:
-        model = neighbors.KNNRegressor()
-    cost = metrics.MAE()
+        model = SGDRegressor()
+    # cost = metrics.MAE()
     train_part_data = read_part_data(train_d)
     sorted_groups = sorted(train_part_data.groups.keys())
+    # sorted_groups = sorted_groups[0:2]
     for date_id in tqdm(sorted_groups):
         train_d_tmp = train_part_data.get_group(date_id)
         # 训练数据每次用5条来进行学习
@@ -79,19 +94,88 @@ def online_learning(train_d : pd.DataFrame, model : neighbors.KNNRegressor() = N
         train_data = train_d_tmp.drop(
             columns=['date_id', 'time_id', 'symbol_id', 'responder_0', 'responder_1', 'responder_2', 'responder_3', 'responder_4', 'responder_5',
                      'responder_6', 'responder_7', 'responder_8'])
-        train_label = train_d_tmp.loc[:, ['responder_6']]
-        # 训练集逐一训练更新
-        length = len(train_data)
-        for i in tqdm(range(0, length)):
-            d, l = train_data.iloc[i:i+1], train_label[i:i+1]
-            d_dict = d.loc[i].to_dict()
-            l_num = l.iloc[0, l.columns.get_loc('responder_6')]
-            weight = d.iloc[0, d.columns.get_loc('weight')]
-            y_pred = model.predict_one(d_dict)
-            model.learn_one(d_dict, l_num)
-            cost.update(l_num, y_pred, weight)
-        print(cost)
 
+        train_label = train_d_tmp.loc[:, ['responder_0', 'responder_1', 'responder_2', 'responder_3', 'responder_4', 'responder_5',
+                     'responder_6', 'responder_7', 'responder_8']]
+        train_data = deal_data(train_data)
+        train_data = train_data.fillna(0.0)
+        # 训练集逐一训练更新
+        # length = len(train_data)
+        train_numpy = train_data.to_numpy()
+        test_numpy = train_label.to_numpy()
+        model.partial_fit(train_numpy, test_numpy)
+        # for i in tqdm(range(0, length)):
+        #     d, l = train_data.iloc[i:i+1], train_label[i:i+1]
+        #     d_dict = d.iloc[0, :].to_dict()
+        #     l_num = l.iloc[0, l.columns.get_loc('responder_6')]
+        #     weight = d.iloc[0, d.columns.get_loc('weight')]
+        #     y_pred = model.predict(d_dict)
+            # cost = model.score()
+            # model.learn_one(d_dict, l_num)
+            # cost.update(l_num, y_pred, weight)
+        # print(cost)
+
+def online_learning_by_symbol(train_d, lags : pd.DataFrame, model : SGDRegressor() = None):
+    if model is None:
+        model = SGDRegressor()
+    # sorted_groups = sorted_groups[0:2]
+    train_data_len = len(train_d)
+    history_lags = lags.loc[:, ['responder_0_lag_1', 'responder_1_lag_1', 'responder_2_lag_1', 'responder_3_lag_1', 'responder_4_lag_1', 'responder_5_lag_1', 'responder_6_lag_1', 'responder_7_lag_1', 'responder_8_lag_1']]
+    # history_lags = df = pd.DataFrame(0, index=range(rows), columns=range(cols))
+    for batch in tqdm(range(0, int(train_data_len / 39))):
+        train_d_tmp = train_d.loc[batch * 39 : (batch + 1) * 39 - 1]
+        train_d_tmp = train_d_tmp.reset_index(drop=True)
+        # 训练数据每次用5条来进行学习
+        # print(train_d_tmp.head())
+        # print(date_id)
+        # 对数据进行区分
+        train_data = train_d_tmp.drop(
+            columns=['date_id', 'time_id', 'symbol_id', 'responder_0', 'responder_1', 'responder_2', 'responder_3', 'responder_4', 'responder_5',
+                     'responder_6', 'responder_7', 'responder_8'])
+        train_label = train_d_tmp.loc[:, ['responder_6']]
+        # train_data = deal_data(train_data)
+        # 拼接lags
+        train_data = pd.concat([train_data, history_lags], axis=1)
+        train_data = train_data.fillna(0.0)
+        # 训练集逐一训练更新
+        # length = len(train_data)
+        train_numpy = train_data.to_numpy()
+        test_numpy = train_label.to_numpy().reshape(-1)
+        model.partial_fit(train_numpy, test_numpy)
+        history_lags = train_d_tmp.loc[:,
+                       ['responder_0', 'responder_1', 'responder_2', 'responder_3', 'responder_4', 'responder_5',
+                        'responder_6', 'responder_7', 'responder_8']]
+        # for i in tqdm(range(0, length)):
+        #     d, l = train_data.iloc[i:i+1], train_label[i:i+1]
+        #     d_dict = d.iloc[0, :].to_dict()
+        #     l_num = l.iloc[0, l.columns.get_loc('responder_6')]
+        #     weight = d.iloc[0, d.columns.get_loc('weight')]
+        #     y_pred = model.predict(d_dict)
+            # cost = model.score()
+            # model.learn_one(d_dict, l_num)
+            # cost.update(l_num, y_pred, weight)
+        # print(cost)
+
+
+def online_predict(test_data, lags : pd.DataFrame, model : SGDRegressor()) -> pd.DataFrame:
+    test_data_tmp = test_data.drop(columns=['row_id', 'date_id', 'time_id', 'symbol_id', 'is_scored'])
+    history_lags = lags.loc[:, ['responder_0_lag_1', 'responder_1_lag_1', 'responder_2_lag_1', 'responder_3_lag_1',
+                                'responder_4_lag_1', 'responder_5_lag_1', 'responder_6_lag_1', 'responder_7_lag_1',
+                                'responder_8_lag_1']]
+    test_data_tmp = deal_data(test_data_tmp)
+    test_data_tmp = test_data_tmp.fillna(0.0)
+    # pd.set_option('display.max_rows', None)
+    # pd.set_option('display.max_columns', None)
+    # print(test_data_tmp)
+    length = len(test_data) / 39
+    for i in tqdm(range(0, int(length))):
+        d = test_data_tmp.iloc[i:i + 38]
+        d = d.reset_index(drop=True)
+        d = pd.concat([d, history_lags], axis=1)
+        x = d.to_numpy()
+        y_pred = model.predict(x)
+        print(y_pred)
+        test_data.loc[i : i + 38, 'responder_6'] = y_pred
 
 def nn(train_d, train_l: pd.DataFrame):
     callback = tf.keras.callbacks.LambdaCallback(on_epoch_end=lambda batch, logs: [callback.on_train_begin])
@@ -253,6 +337,7 @@ def predict(test: pl.DataFrame, lags: pl.DataFrame | None) -> pl.DataFrame | pd.
 
 def main():
     train_data, test_data = read_org_data_tmp()
+    lags = read_lags_data()
     # print(test_data.head())
     # train_data, test_data = deal_data(train_data, test_data)
 
@@ -273,7 +358,13 @@ def main():
     # tr = pd.concat((test_data, tr), axis=1)
     # output = predict(pl.from_pandas(tr), None).to_pandas()
     # output.to_csv('submission.csv', index=False)
-    online_learning(train_data)
+    model = SGDRegressor()
+    # online_learning(train_data, model)
+    online_learning_by_symbol(train_data, lags, model)
+    # online_predict(test_data, model)
+    output = predict(pl.from_pandas(test_data), None).to_pandas()
+    output.to_csv('submission.csv', index=False)
+
 
 if __name__ == '__main__':
     main()

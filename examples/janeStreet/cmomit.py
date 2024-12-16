@@ -4,15 +4,10 @@ import pandas as pd
 import polars as pl
 import numpy as np
 import os
-from river import neighbors
-from river import metrics
 from pathlib import Path
-import river
-
-
-# Visualization imports
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sklearn.linear_model import SGDRegressor
 from tqdm import tqdm
 import tensorflow as tf
 import tensorflow_decision_forests as tfd
@@ -36,24 +31,18 @@ def read_org_test_data():
     test_ds = pd.read_parquet(test_parquets[0])
     return test_ds
 
-def deal_data(train_ds, test_ds: pd.DataFrame):
-    # 1.填充空值，添加相关指示值
-    train_data = train_ds.drop(columns=['symbol_id'])
-    test_ds = test_ds.drop(columns=['symbol_id'])
-    test_data = test_ds.drop(columns=['is_scored'])
-    return train_data, test_data
-
 # part_data 将每个训练集合切片，并保留交叉校验集合
 def read_part_data(train_ds : pd.DataFrame):
     train_pd = train_ds.groupby('date_id')
     return train_pd
 
-def online_learning(train_d : pd.DataFrame, model : neighbors.KNNRegressor() = None):
+def online_learning(train_d : pd.DataFrame, model : SGDRegressor() = None):
     if model is None:
-        model = neighbors.KNNRegressor()
-    cost = metrics.MAE()
+        model = SGDRegressor()
+    # cost = metrics.MAE()
     train_part_data = read_part_data(train_d)
     sorted_groups = sorted(train_part_data.groups.keys())
+    # sorted_groups = sorted_groups[0:2]
     for date_id in tqdm(sorted_groups):
         train_d_tmp = train_part_data.get_group(date_id)
         # 训练数据每次用5条来进行学习
@@ -64,45 +53,34 @@ def online_learning(train_d : pd.DataFrame, model : neighbors.KNNRegressor() = N
             columns=['date_id', 'time_id', 'symbol_id', 'responder_0', 'responder_1', 'responder_2', 'responder_3', 'responder_4', 'responder_5',
                      'responder_6', 'responder_7', 'responder_8'])
         train_label = train_d_tmp.loc[:, ['responder_6']]
+        train_data = train_data.fillna(0.0)
         # 训练集逐一训练更新
-        length = len(train_data)
-        for i in tqdm(range(0, length)):
-            d, l = train_data.iloc[i:i+1], train_label[i:i+1]
-            d_dict = d.loc[i].to_dict()
-            l_num = l.iloc[0, l.columns.get_loc('responder_6')]
-            weight = d.iloc[0, d.columns.get_loc('weight')]
-            y_pred = model.predict_one(d_dict)
-            model.learn_one(d_dict, l_num)
-            cost.update(l_num, y_pred, weight)
-        print(cost)
-
-def nn(train_d, train_l: pd.DataFrame):
-    callback = tf.keras.callbacks.LambdaCallback(on_epoch_end=lambda batch, logs: [callback.on_train_begin])
-    # 1.建立全连接神经网络
-    model = tf.keras.models.Sequential([
-        tf.keras.layers.Dense(256, activation='relu'),
-        tf.keras.layers.Dense(128, activation='relu'),
-        # tf.keras.layers.Dropout(0.2),
-        # 此处激活函数帮我跳出了局部最小值，线性激活函数输出的是z1-z6,用softmax才会输出概率值
-        tf.keras.layers.Dense(9, activation='relu')
-    ])
-    # 2.调整数据格式
-    train_data = train_d.astype(np.float64)
-    train_label = train_l.astype(np.float64)
-    # 4.1定义损失函数--得分损失函数,用均方误差作为反向传播基准
-    # loss_fn = Cost(weights=train_data['weights'])
-    loss_fn = tf.keras.losses.MeanSquaredError()
-    model.compile(optimizer='adam', loss=loss_fn, metrics=['mae'])
-    # 5.进行训练
-    """
-    1.mae损失函数，简单的nn，mae≈5.8，loss≈9.4
-    2.根据得分函数自定义损失函数，nn不变，
-    """
-    train_history = model.fit(train_data, train_label, epochs=2)
-    # 6.保存模型
-    return model
+        # length = len(train_data)
+        train_numpy = train_data.to_numpy()
+        test_numpy = train_label.to_numpy()
+        model.partial_fit(train_numpy, test_numpy)
+        # for i in tqdm(range(0, length)):
+        #     d, l = train_data.iloc[i:i+1], train_label[i:i+1]
+        #     d_dict = d.iloc[0, :].to_dict()
+        #     l_num = l.iloc[0, l.columns.get_loc('responder_6')]
+        #     weight = d.iloc[0, d.columns.get_loc('weight')]
+        #     y_pred = model.predict(d_dict)
+            # cost = model.score()
+            # model.learn_one(d_dict, l_num)
+            # cost.update(l_num, y_pred, weight)
+        # print(cost)
 
 
+def online_predict(test_data : pd.DataFrame, model : SGDRegressor()) -> pd.DataFrame:
+    test_data_tmp = test_data.drop(columns=['row_id', 'date_id', 'time_id', 'symbol_id', 'is_scored'])
+    test_data_tmp = test_data_tmp.fillna(0.0)
+    length = len(test_data)
+    for i in tqdm(range(0, length)):
+        d = test_data_tmp.iloc[i:i + 1]
+        x = d.to_numpy()
+        y_pred = model.predict(x)
+        print(y_pred)
+        test_data.loc[i, 'responder_6'] = y_pred
 
 # Replace this function with your inference code.
 # You can return either a Pandas or Polars dataframe, though Polars is recommended.
@@ -142,23 +120,12 @@ else:
         )
     )
 
-train_data, test_data = read_org_train_data()
 
-train_data, test_data = deal_data(train_data, test_data)
-
-train_d = train_data.drop(
-    columns=['responder_0', 'responder_1', 'responder_2', 'responder_3', 'responder_4', 'responder_5',
-            'responder_6', 'responder_7', 'responder_8'])
-train_l = train_data.loc[:,
-            ['responder_0', 'responder_1', 'responder_2', 'responder_3', 'responder_4', 'responder_5', 'responder_6',
-            'responder_7', 'responder_8']]
-model = nn(train_d, train_l)
-
-test_d = test_data.drop(columns=['row_id'])
-test_result = model.predict(test_d)
-tr = pd.DataFrame(test_result,
-                columns=['responder_0', 'responder_1', 'responder_2', 'responder_3', 'responder_4', 'responder_5',
-                        'responder_6','responder_7', 'responder_8'])
-tr = pd.concat((test_data, tr), axis=1)
-output = predict(pl.from_pandas(tr), None).to_pandas()
+model = SGDRegressor()
+for i in range(0, N_PARTITION):
+    train_data = read_org_train_data(i)
+    online_learning(train_data, model)
+test_data = read_org_test_data()
+online_predict(test_data, model)
+output = predict(pl.from_pandas(test_data), None).to_pandas()
 output.to_csv('submission.csv', index=False)
