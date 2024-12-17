@@ -85,6 +85,7 @@ def online_predict(test_data, lags : pd.DataFrame, model : SGDRegressor()) -> pd
         y_pred = model.predict(x)
         print(y_pred)
         test_data.loc[i : i + 38, 'responder_6'] = y_pred
+    return test_data
 
 
 # Replace this function with your inference code.
@@ -100,7 +101,7 @@ def predict(test: pl.DataFrame, lags: pl.DataFrame | None) -> pl.DataFrame | pd.
     # Replace this section with your own predictions
     predictions = test.select(
         'row_id',
-        'response_6'
+        'responder_6'
         # pl.lit(0.0).alias('responder_6'),
     )
     if isinstance(predictions, pl.DataFrame):
@@ -124,7 +125,7 @@ for i in range(N_PARTITION):
     train_data = read_org_train_data(0)
     online_learning_by_symbol(train_data, lags, model)
 test_data = read_org_test_data()
-online_predict(test_data, lags, model)
+test_data = online_predict(test_data, lags, model)
 output = predict(pl.from_pandas(test_data), None).to_pandas()
 output.to_csv('submission.csv', index=False)
 
