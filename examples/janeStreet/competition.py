@@ -162,8 +162,8 @@ def online_predict(test_data, lags : pd.DataFrame, model : SGDRegressor()) -> pd
     history_lags = lags.loc[:, ['responder_0_lag_1', 'responder_1_lag_1', 'responder_2_lag_1', 'responder_3_lag_1',
                                 'responder_4_lag_1', 'responder_5_lag_1', 'responder_6_lag_1', 'responder_7_lag_1',
                                 'responder_8_lag_1']]
-    test_data_tmp = deal_data(test_data_tmp)
-    test_data_tmp = test_data_tmp.fillna(0.0)
+    # test_data_tmp = deal_data(test_data_tmp)
+    # test_data_tmp = test_data_tmp.fillna(0.0)
     # pd.set_option('display.max_rows', None)
     # pd.set_option('display.max_columns', None)
     # print(test_data_tmp)
@@ -172,6 +172,7 @@ def online_predict(test_data, lags : pd.DataFrame, model : SGDRegressor()) -> pd
         d = test_data_tmp.iloc[i:i + 38]
         d = d.reset_index(drop=True)
         d = pd.concat([d, history_lags], axis=1)
+        d = d.fillna(0.0)
         x = d.to_numpy()
         y_pred = model.predict(x)
         print(y_pred)
@@ -322,7 +323,8 @@ def predict(test: pl.DataFrame, lags: pl.DataFrame | None) -> pl.DataFrame | pd.
     # Replace this section with your own predictions
     predictions = test.select(
         'row_id',
-        pl.lit(0.0).alias('responder_6'),
+        'responder_6'
+        # pl.lit('responder_6').alias('responder_6'),
     )
     if isinstance(predictions, pl.DataFrame):
         assert predictions.columns == ['row_id', 'responder_6']
@@ -361,7 +363,7 @@ def main():
     model = SGDRegressor()
     # online_learning(train_data, model)
     online_learning_by_symbol(train_data, lags, model)
-    # online_predict(test_data, model)
+    online_predict(test_data, lags, model)
     output = predict(pl.from_pandas(test_data), None).to_pandas()
     output.to_csv('submission.csv', index=False)
 
