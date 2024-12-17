@@ -1,5 +1,3 @@
-import os
-import kaggle_evaluation.jane_street_inference_server
 import pandas as pd
 import polars as pl
 import numpy as np
@@ -70,8 +68,6 @@ def online_learning_by_symbol(train_d, lags: pd.DataFrame, model: SGDRegressor()
         history_lags = train_d_tmp.loc[:,
                        ['responder_0', 'responder_1', 'responder_2', 'responder_3', 'responder_4', 'responder_5',
                         'responder_6', 'responder_7', 'responder_8']]
-    lags = history_lags
-    return lags, model
 
 
 def online_predict(test_data, lags : pd.DataFrame, model : SGDRegressor()) -> pd.DataFrame:
@@ -122,6 +118,18 @@ def read_lags_data() -> pd.DataFrame:
     lags = pd.read_parquet(lags_file)
     return lags
 
+lags = read_lags_data()
+model = SGDRegressor()
+for i in range(N_PARTITION):
+    train_data = read_org_train_data(0)
+    online_learning_by_symbol(train_data, lags, model)
+test_data = read_org_test_data()
+online_predict(test_data, lags, model)
+output = predict(pl.from_pandas(test_data), None).to_pandas()
+output.to_csv('submission.csv', index=False)
+
+import kaggle_evaluation.jane_street_inference_server
+import os
 
 inference_server = kaggle_evaluation.jane_street_inference_server.JSInferenceServer(predict)
 
@@ -134,13 +142,3 @@ else:
             '/kaggle/input/jane-street-real-time-market-data-forecasting/lags.parquet',
         )
     )
-
-lags = read_lags_data()
-model = SGDRegressor()
-for i in range(N_PARTITION):
-    train_data = read_org_train_data(0)
-    lags, model = online_learning_by_symbol(train_data, lags, model)
-test_data = read_org_test_data()
-online_predict(test_data, lags, model)
-output = predict(pl.from_pandas(test_data), None).to_pandas()
-output.to_csv('submission.csv', index=False)
