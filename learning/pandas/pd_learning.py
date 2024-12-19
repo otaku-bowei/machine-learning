@@ -1,4 +1,6 @@
 import pandas as pd
+import numpy as np
+
 
 def test():
     #0.读取文件
@@ -73,3 +75,16 @@ def test():
     print(train_data.rename(columns={'PassengerId':'id'}))
     print(train_data.rename_axis("PassengerId", axis='rows'))
     #11.联表
+
+    # 假设你有一个现有的 DataFrame
+    df = pd.DataFrame({
+        'existing_column': [10, 20, 30, 40, 50]
+    })
+
+    # 假设你有一个 numpy 数组
+    numpy_array = np.array([1, 2, 3, 4, 5])
+
+    # 将 numpy 数组作为新列添加到 DataFrame 中
+    df['new_column_name'] = numpy_array
+
+    print(df)

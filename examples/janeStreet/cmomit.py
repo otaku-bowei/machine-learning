@@ -9,6 +9,8 @@ from sklearn.linear_model import SGDRegressor
 from tqdm import tqdm
 import tensorflow as tf
 import tensorflow_decision_forests as tfd
+import kaggle_evaluation.jane_street_inference_server
+import os
 
 # Gather the train data partitions
 DATA_DIR = Path('/kaggle/input/jane-street-real-time-market-data-forecasting')
@@ -38,56 +40,65 @@ def read_part_data(train_ds: pd.DataFrame):
     return train_pd
 
 
-def online_learning_by_symbol(train_d, lags: pd.DataFrame, model: SGDRegressor() = None):
+def online_learning_by_symbol(train_d : pd.DataFrame, model : SGDRegressor() = None):
     if model is None:
         model = SGDRegressor()
     # sorted_groups = sorted_groups[0:2]
     train_data_len = len(train_d)
-    history_lags = lags.loc[:, ['responder_0_lag_1', 'responder_1_lag_1', 'responder_2_lag_1', 'responder_3_lag_1',
-                                'responder_4_lag_1', 'responder_5_lag_1', 'responder_6_lag_1', 'responder_7_lag_1',
-                                'responder_8_lag_1']]
-    # history_lags = df = pd.DataFrame(0, index=range(rows), columns=range(cols))
     for batch in tqdm(range(0, int(train_data_len / 39))):
-        train_d_tmp = train_d.loc[batch * 39: (batch + 1) * 39 - 1]
+        train_d_tmp = train_d.loc[batch * 39 : (batch + 1) * 39 - 1]
         train_d_tmp = train_d_tmp.reset_index(drop=True)
+        # 训练数据每次用5条来进行学习
+        # print(train_d_tmp.head())
+        # print(date_id)
         # 对数据进行区分
         train_data = train_d_tmp.drop(
-            columns=['date_id', 'time_id', 'symbol_id', 'responder_0', 'responder_1', 'responder_2', 'responder_3',
-                     'responder_4', 'responder_5',
+            columns=['date_id', 'time_id', 'symbol_id', 'responder_0', 'responder_1', 'responder_2', 'responder_3', 'responder_4', 'responder_5',
                      'responder_6', 'responder_7', 'responder_8'])
         train_label = train_d_tmp.loc[:, ['responder_6']]
-        # train_data = deal_data(train_data)
         # 拼接lags
-        train_data = pd.concat([train_data, history_lags], axis=1)
         train_data = train_data.fillna(0.0)
         # 训练集逐一训练更新
-        # length = len(train_data)
         train_numpy = train_data.to_numpy()
-        test_numpy = train_label.to_numpy().reshape(-1)
+        test_numpy = train_label.to_numpy().ravel()
         model.partial_fit(train_numpy, test_numpy)
-        history_lags = train_d_tmp.loc[:,
-                       ['responder_0', 'responder_1', 'responder_2', 'responder_3', 'responder_4', 'responder_5',
-                        'responder_6', 'responder_7', 'responder_8']]
+
+model = SGDRegressor()
 
 
-def online_predict(test_data, lags : pd.DataFrame, model : SGDRegressor()) -> pd.DataFrame:
+def online_predict(test_data : pd.DataFrame, model : SGDRegressor()) -> pd.DataFrame:
     test_data_tmp = test_data.drop(columns=['row_id', 'date_id', 'time_id', 'symbol_id', 'is_scored'])
-    history_lags = lags.loc[:, ['responder_0_lag_1', 'responder_1_lag_1', 'responder_2_lag_1', 'responder_3_lag_1',
-                                'responder_4_lag_1', 'responder_5_lag_1', 'responder_6_lag_1', 'responder_7_lag_1',
-                                'responder_8_lag_1']]
     length = len(test_data) / 39
+    result = np.ndarray
     for i in tqdm(range(0, int(length))):
-        d = test_data_tmp.iloc[i:i + 38]
+        d = test_data_tmp.loc[i * 39:(i+1) * 39 - 1]
         d = d.reset_index(drop=True)
-        d = pd.concat([d, history_lags], axis=1)
         d = d.fillna(0.0)
         x = d.to_numpy()
         y_pred = model.predict(x)
-        print(y_pred)
-        test_data.loc[i : i + 38, 'responder_6'] = y_pred
-    return test_data
+        if i == 0:
+            result = y_pred
+        else:
+            result = np.append(result, y_pred)
+        # test_data.loc[i : i + 39, 'responder_6'] = y_pred
+    test_data['responder_6'] = result
+    return test_data.loc[:, ['row_id', 'responder_6']]
 
 
+
+def read_lags_data() -> pd.DataFrame:
+    lags = pd.read_parquet(lags_file)
+    return lags
+
+lags = read_lags_data()
+model = SGDRegressor()
+for i in range(N_PARTITION):
+    train_data = read_org_train_data(0)
+    online_learning_by_symbol(train_data, model)
+# test_data = read_org_test_data()
+# test_data = online_predict(test_data, model)
+# output = predict(pl.from_pandas(test_data), None).to_pandas()
+# output.to_csv('submission.csv', index=False)
 # Replace this function with your inference code.
 # You can return either a Pandas or Polars dataframe, though Polars is recommended.
 # Each batch of predictions (except the very first) must be returned within 1 minute of the batch features being provided.
@@ -99,11 +110,10 @@ def predict(test: pl.DataFrame, lags: pl.DataFrame | None) -> pl.DataFrame | pd.
     if lags is not None:
         lags_ = lags
     # Replace this section with your own predictions
-    predictions = test.select(
-        'row_id',
-        'responder_6'
-        # pl.lit(0.0).alias('responder_6'),
-    )
+    data_dict = test.to_dict()
+    # 使用字典创建一个 pandas.DataFrame 对象
+    pd_df = pd.DataFrame(data_dict)
+    predictions = online_predict(pd_df, model)
     if isinstance(predictions, pl.DataFrame):
         assert predictions.columns == ['row_id', 'responder_6']
     elif isinstance(predictions, pd.DataFrame):
@@ -113,24 +123,6 @@ def predict(test: pl.DataFrame, lags: pl.DataFrame | None) -> pl.DataFrame | pd.
     # Confirm has as many rows as the test data.
     assert len(predictions) == len(test)
     return predictions
-
-
-def read_lags_data() -> pd.DataFrame:
-    lags = pd.read_parquet(lags_file)
-    return lags
-
-lags = read_lags_data()
-model = SGDRegressor()
-for i in range(N_PARTITION):
-    train_data = read_org_train_data(0)
-    online_learning_by_symbol(train_data, lags, model)
-test_data = read_org_test_data()
-test_data = online_predict(test_data, lags, model)
-output = predict(pl.from_pandas(test_data), None).to_pandas()
-output.to_csv('submission.csv', index=False)
-
-import kaggle_evaluation.jane_street_inference_server
-import os
 
 inference_server = kaggle_evaluation.jane_street_inference_server.JSInferenceServer(predict)
 
