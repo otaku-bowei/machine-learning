@@ -40,20 +40,21 @@ def read_part_data(train_ds: pd.DataFrame):
     return train_pd
 
 
-def online_learning_by_symbol(train_d : pd.DataFrame, model : SGDRegressor() = None):
+def online_learning_by_symbol(train_d: pd.DataFrame, model: SGDRegressor() = None):
     if model is None:
         model = SGDRegressor()
     # sorted_groups = sorted_groups[0:2]
     train_data_len = len(train_d)
     for batch in tqdm(range(0, int(train_data_len / 39))):
-        train_d_tmp = train_d.loc[batch * 39 : (batch + 1) * 39 - 1]
+        train_d_tmp = train_d.loc[batch * 39: (batch + 1) * 39 - 1]
         train_d_tmp = train_d_tmp.reset_index(drop=True)
         # 训练数据每次用5条来进行学习
         # print(train_d_tmp.head())
         # print(date_id)
         # 对数据进行区分
         train_data = train_d_tmp.drop(
-            columns=['date_id', 'time_id', 'symbol_id', 'responder_0', 'responder_1', 'responder_2', 'responder_3', 'responder_4', 'responder_5',
+            columns=['date_id', 'time_id', 'symbol_id', 'responder_0', 'responder_1', 'responder_2', 'responder_3',
+                     'responder_4', 'responder_5',
                      'responder_6', 'responder_7', 'responder_8'])
         train_label = train_d_tmp.loc[:, ['responder_6']]
         # 拼接lags
@@ -63,15 +64,16 @@ def online_learning_by_symbol(train_d : pd.DataFrame, model : SGDRegressor() = N
         test_numpy = train_label.to_numpy().ravel()
         model.partial_fit(train_numpy, test_numpy)
 
-model = SGDRegressor()
+
+model_init = SGDRegressor()
 
 
-def online_predict(test_data : pd.DataFrame, model : SGDRegressor()) -> pd.DataFrame:
+def online_predict(test_data: pd.DataFrame, model: SGDRegressor()) -> pd.DataFrame:
     test_data_tmp = test_data.drop(columns=['row_id', 'date_id', 'time_id', 'symbol_id', 'is_scored'])
     length = len(test_data) / 39
     result = np.ndarray
     for i in tqdm(range(0, int(length))):
-        d = test_data_tmp.loc[i * 39:(i+1) * 39 - 1]
+        d = test_data_tmp.loc[i * 39:(i + 1) * 39 - 1]
         d = d.reset_index(drop=True)
         d = d.fillna(0.0)
         x = d.to_numpy()
@@ -87,18 +89,19 @@ def online_predict(test_data : pd.DataFrame, model : SGDRegressor()) -> pd.DataF
 
 
 def read_lags_data() -> pd.DataFrame:
-    lags = pd.read_parquet(lags_file)
-    return lags
+    lags_l = pd.read_parquet(lags_file)
+    return lags_l
+
 
 lags = read_lags_data()
-model = SGDRegressor()
 for i in range(N_PARTITION):
     train_data = read_org_train_data(0)
-    online_learning_by_symbol(train_data, model)
+    online_learning_by_symbol(train_data, model_init)
 # test_data = read_org_test_data()
 # test_data = online_predict(test_data, model)
 # output = predict(pl.from_pandas(test_data), None).to_pandas()
 # output.to_csv('submission.csv', index=False)
+
 # Replace this function with your inference code.
 # You can return either a Pandas or Polars dataframe, though Polars is recommended.
 # Each batch of predictions (except the very first) must be returned within 1 minute of the batch features being provided.
@@ -109,11 +112,7 @@ def predict(test: pl.DataFrame, lags: pl.DataFrame | None) -> pl.DataFrame | pd.
     global lags_
     if lags is not None:
         lags_ = lags
-    # Replace this section with your own predictions
-    data_dict = test.to_dict()
-    # 使用字典创建一个 pandas.DataFrame 对象
-    pd_df = pd.DataFrame(data_dict)
-    predictions = online_predict(pd_df, model)
+    predictions = online_predict(test, model_init)
     if isinstance(predictions, pl.DataFrame):
         assert predictions.columns == ['row_id', 'responder_6']
     elif isinstance(predictions, pd.DataFrame):
@@ -123,6 +122,8 @@ def predict(test: pl.DataFrame, lags: pl.DataFrame | None) -> pl.DataFrame | pd.
     # Confirm has as many rows as the test data.
     assert len(predictions) == len(test)
     return predictions
+
+
 
 inference_server = kaggle_evaluation.jane_street_inference_server.JSInferenceServer(predict)
 
@@ -135,3 +136,6 @@ else:
             '/kaggle/input/jane-street-real-time-market-data-forecasting/lags.parquet',
         )
     )
+
+submission = pl.read_parquet("/kaggle/working/submission.parquet")
+submission

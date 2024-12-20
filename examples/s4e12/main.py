@@ -29,6 +29,7 @@ def print_dp(data: pd.DataFrame):
     pd.set_option('display.max_columns', None)
     print(data.head())
 
+
 # one-hot向量转换为0-1编码
 def one_hot_numpy(data: pd.DataFrame, col_name: string) -> pd.DataFrame:
     # 创建一个OneHotEncoder对象
@@ -49,8 +50,9 @@ def read_csv(file_path: string) -> pd.DataFrame:
 TRAIN_PATH = './train.csv'
 TEST_PATH = './test.csv'
 ONE_HOT_FIELD = ['Gender', 'Marital Status', 'Education Level', 'Occupation', 'Policy Type', 'Property Type']
-NP_FIELD = ['Age', 'Annual Income', 'Number of Dependents', 'Health Score', 'Premium Amount']
-TEST_NP_FIELD = ['Age', 'Annual Income', 'Number of Dependents', 'Health Score', 'id']
+NP_FIELD = ['Age', 'Annual Income', 'Number of Dependents', 'Health Score', 'Premium Amount', 'Policy Start Date']
+TEST_NP_FIELD = ['Age', 'Annual Income', 'Number of Dependents', 'Health Score', 'id', 'Policy Start Date']
+CATEGORICAL_FEATURE = ['Gender', 'Marital Status', 'Education Level', 'Occupation', 'Location',  'Policy Type', 'Customer Feedback', 'Smoking Status', 'Exercise Frequency', 'Property Type']
 params = {
     'bagging_freq': 5,
     'bagging_fraction': 1.0,
@@ -76,7 +78,8 @@ params = {
 def train(train_data, train_label: pd.DataFrame):
     # 将训练集分为训练数据和交叉验证数据
     length = len(train_data)
-    index = int(length * 0.8)
+    # 交叉验证集的比例会稍微影响决策树精度
+    index = int(length * 0.5)
     train_d = train_data.loc[:index, :]
     valid_d = train_data.loc[index:, :]
     train_l = train_label.loc[:index, :]
@@ -88,11 +91,50 @@ def train(train_data, train_label: pd.DataFrame):
     return bst
 
 
-def predict(data: lgb.Dataset):
+def train_with_categorical_feature(train_data, train_label : pd.DataFrame):
+    # 将训练集分为训练数据和交叉验证数据
+    length = len(train_data)
+    index = int(length * 0.8)
+    train_d = train_data.loc[:index, :]
+    valid_d = train_data.loc[index:, :]
+    train_l = train_label.loc[:index, :]
+    valid_l = train_label.loc[index:, :]
+    # FIXME
+    data = lgb.Dataset(train_d, label=train_l, categorical_feature=CATEGORICAL_FEATURE)
+    valid = lgb.Dataset(valid_d, label=valid_l, categorical_feature=CATEGORICAL_FEATURE)
+    # 添加交叉验证，评分直接 2.81342提升到1.09089
+    bst = lgb.train(params, data, num_boost_round=200, valid_sets=valid)
+    return bst
+
+
+def one_hot_fix(data, org_data: pd.DataFrame, clo_names: []) -> pd.DataFrame:
+    for field_name in clo_names:
+        type_one_hot = one_hot_numpy(org_data, field_name)
+        data = pd.concat([data, type_one_hot], axis=1)
+    return data
+
+
+def predict(data: lgb.Dataset, model_name: string):
     # init model
-    bst = lgb.Booster(model_file='model.txt')
+    bst = lgb.Booster(model_file=model_name)
     y_pred = bst.predict(data)
     return y_pred
+
+
+# precision_fix 精度扩展，对某些字段进行精度扩展字段--对决策树处理回归问题有帮助
+def precision_fix():
+    print()
+
+
+# date_fix 处理日期字段
+def date_fix(data: pd.DataFrame, field: string) -> pd.DataFrame:
+    df = pd.DataFrame(data.loc[:, [field]])
+    df['date'] = pd.to_datetime(df[field])
+    df['year'] = df['date'].dt.year
+    df['month'] = df['date'].dt.month
+    df['day'] = df['date'].dt.day
+    data = pd.concat([data, df.drop([field, 'date'], axis=1)], axis=1)
+    return data.drop([field], axis=1)
 
 
 # main 主函数
@@ -103,12 +145,10 @@ def main():
     test_data = test_org_data.loc[:, TEST_NP_FIELD]
     # 对'Marital Status', 'Education Level', 'Occupation', 'Policy Type', 'Property Type'字段进行独热编码
     # TODO--lightgbm原生支持分类编码而无需进行one-hot编码——categorical_feature参数
-    for field_name in ONE_HOT_FIELD:
-        type_one_hot = one_hot_numpy(train_org_data, field_name)
-        train_data = pd.concat([train_data, type_one_hot], axis=1)
-    for field_name in ONE_HOT_FIELD:
-        type_one_hot = one_hot_numpy(test_org_data, field_name)
-        test_data = pd.concat([test_data, type_one_hot], axis=1)
+    train_data = one_hot_fix(train_data, train_org_data, CATEGORICAL_FEATURE)
+    train_data = date_fix(train_data, 'Policy Start Date')
+    test_data = one_hot_fix(test_data, test_org_data, CATEGORICAL_FEATURE)
+    test_data = date_fix(test_data, 'Policy Start Date')
     # 乱序
     train_data = pd.DataFrame(train_data)
     # 提取label
@@ -116,25 +156,45 @@ def main():
     train_data = train_data.drop(['Premium Amount'], axis=1)
     test_id = test_data.loc[:, ['id']]
     test_data = test_data.drop(['id'], axis=1)
-    # 标准归一化--和测试集一起做归一化
-    length = len(train_data)
-    cols_names = train_data.columns
-    all_data = pd.concat([train_data, test_data])
-    scaler = StandardScaler()
-    all_data = scaler.fit_transform(all_data)
-    # 重新分为训练集和测试集
-    train_data = pd.DataFrame(all_data, columns=cols_names).iloc[0:length, :]
-    test_data = pd.DataFrame(all_data, columns=cols_names).iloc[length:, :]
-    print_dp(train_data.head())
-    print_dp(test_data.head())
+    # 标准归一化--和测试集一起做归一化--FIXME--去除归一化后由1.08992提升到1.08988
+    # length = len(train_data)
+    # cols_names = train_data.columns
+    # all_data = pd.concat([train_data, test_data])
+    # scaler = StandardScaler()
+    # all_data = scaler.fit_transform(all_data)
+    # # 重新分为训练集和测试集
+    # train_data = pd.DataFrame(all_data, columns=cols_names).iloc[0:length, :]
+    # test_data = pd.DataFrame(all_data, columns=cols_names).iloc[length:, :]
+    # print_dp(train_data.head())
+    # print_dp(test_data.head())
     # 训练
     bst = train(train_data, train_label)
     bst.save_model('model.txt', num_iteration=bst.best_iteration)
     # 预测
-    predictions = predict(test_data)
+    predictions = predict(test_data, 'model.txt')
     test_id['Premium Amount'] = predictions
     output = pd.DataFrame(test_id, columns=['id', 'Premium Amount'])
     output.to_csv('output.csv', index=False)
+
+
+def main2():
+    train_org_data = pd.read_csv(TRAIN_PATH)
+    test_org_data = pd.read_csv(TEST_PATH)
+    train_data = train_org_data.drop(['Policy Start Date'], axis=1)
+    test_data = test_org_data.drop(['Policy Start Date'], axis=1)
+    # 区分值
+    train_label = train_data.loc[:, ['Premium Amount']]
+    train_data = train_data.drop(['Premium Amount'], axis=1)
+    test_id = test_data.loc[:, ['id']]
+    test_data = test_data.drop(['id'], axis=1)
+    bst = train_with_categorical_feature(train_data, train_label)
+    bst.save_model('model2.txt', num_iteration=bst.best_iteration)
+    # 预测
+    predictions = predict(lgb.Dataset(test_data), 'model2.txt')
+    test_id['Premium Amount'] = predictions
+    output = pd.DataFrame(test_id, columns=['id', 'Premium Amount'])
+    output.to_csv('output.csv', index=False)
+
 
 
 if __name__ == "__main__":
