@@ -19,6 +19,7 @@ import tensorflow as tf
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+import tool.tensorboard.tensor_board as tb
 from tqdm import tqdm
 import lightgbm as lgb
 
@@ -126,6 +127,15 @@ def precision_fix():
     print()
 
 
+# nan_to_mean 某些列的 nan 是有意义的，将其标识为平均值，TODO--并用标识列标注该值
+def nan_to_mean(data: pd.DataFrame, field: string, num: int = None) -> pd.DataFrame:
+    if num is None:
+        data.fillna(data.mean(), inplace=True)
+    else:
+        data.fillna(num, inplace=True)
+    return data
+
+
 # date_fix 处理日期字段
 def date_fix(data: pd.DataFrame, field: string) -> pd.DataFrame:
     df = pd.DataFrame(data.loc[:, [field]])
@@ -137,8 +147,86 @@ def date_fix(data: pd.DataFrame, field: string) -> pd.DataFrame:
     return data.drop([field], axis=1)
 
 
-# main 主函数
-def main():
+def train_by_nn():
+    # 1.预处理数据
+    train_org_data = pd.read_csv(TRAIN_PATH)
+    test_org_data = pd.read_csv(TEST_PATH)
+    train_data = train_org_data.loc[:, NP_FIELD]
+    test_data = test_org_data.loc[:, TEST_NP_FIELD]
+    # 对'Marital Status', 'Education Level', 'Occupation', 'Policy Type', 'Property Type'字段进行独热编码
+    # TODO--lightgbm原生支持分类编码而无需进行one-hot编码——categorical_feature参数
+    train_data = one_hot_fix(train_data, train_org_data, CATEGORICAL_FEATURE)
+    train_data = date_fix(train_data, 'Policy Start Date')
+    test_data = one_hot_fix(test_data, test_org_data, CATEGORICAL_FEATURE)
+    test_data = date_fix(test_data, 'Policy Start Date')
+    # 乱序
+    train_data = pd.DataFrame(train_data)
+    # 提取label
+    train_label = train_data.loc[:, ['Premium Amount']]
+    train_data = train_data.drop(['Premium Amount'], axis=1)
+    test_id = test_data.loc[:, ['id']]
+    test_data = test_data.drop(['id'], axis=1)
+    # 标准归一化--和测试集一起做归一化
+    length = len(train_data)
+    cols_names = train_data.columns
+    # 特征工程，处理nan值-- 1.08912提升到1.08899，说明某些字段的nan值是对预测结果有影响的
+    all_data = pd.concat([train_data, test_data])
+    # for col in cols_names:
+    #     all_data = nan_to_mean(all_data, col, -1)
+    scaler = StandardScaler()
+    all_data = scaler.fit_transform(all_data)
+    # 重新分为训练集和测试集
+    train_data = pd.DataFrame(all_data, columns=cols_names).iloc[0:length, :]
+    test_data = pd.DataFrame(all_data, columns=cols_names).iloc[length:, :]
+    model = tf.keras.models.Sequential([
+        tf.keras.layers.Flatten(input_shape=(len(cols_names), )),
+        tf.keras.layers.Dense(64, activation='relu'),
+        tf.keras.layers.Dropout(0.2),
+        tf.keras.layers.Dense(128, activation='relu'),
+        # 丢弃部分神经元梯度下降更稳定，防止梯度消失
+        tf.keras.layers.Dropout(0.2),
+        tf.keras.layers.Dense(32, activation='relu'),
+        tf.keras.layers.Dense(1)
+    ])
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    # 4.2定义tensorBoard
+    tensorboard_callback = tb.draw_board('mnist')
+    # 5.进行训练
+    # model.fit(train_data, train_label, epochs=10, callbacks=[tensorboard_callback])
+    # model.save('nn_model.keras')
+    return test_data, test_id
+
+
+
+def nn_pred(test_data, test_id: pd.DataFrame):
+    model = tf.keras.models.load_model('nn_model.keras')
+    y_test = model.predict(test_data)
+    test_id['Premium Amount'] = y_test
+    output = pd.DataFrame(test_id, columns=['id', 'Premium Amount'])
+    output.to_csv('output.csv', index=False)
+
+
+
+def train_without_one_hot():
+    train_org_data = pd.read_csv(TRAIN_PATH)
+    test_org_data = pd.read_csv(TEST_PATH)
+    train_data = train_org_data.drop(['Policy Start Date'], axis=1)
+    test_data = test_org_data.drop(['Policy Start Date'], axis=1)
+    # 区分值
+    train_label = train_data.loc[:, ['Premium Amount']]
+    train_data = train_data.drop(['Premium Amount'], axis=1)
+    test_id = test_data.loc[:, ['id']]
+    test_data = test_data.drop(['id'], axis=1)
+    bst = train_with_categorical_feature(train_data, train_label)
+    bst.save_model('model2.txt', num_iteration=bst.best_iteration)
+    # 预测
+    predictions = predict(lgb.Dataset(test_data), 'model2.txt')
+    test_id['Premium Amount'] = predictions
+    output = pd.DataFrame(test_id, columns=['id', 'Premium Amount'])
+    output.to_csv('output.csv', index=False)
+
+
+def train_by_lightgbm():
     train_org_data = pd.read_csv(TRAIN_PATH)
     test_org_data = pd.read_csv(TEST_PATH)
     train_data = train_org_data.loc[:, NP_FIELD]
@@ -157,14 +245,17 @@ def main():
     test_id = test_data.loc[:, ['id']]
     test_data = test_data.drop(['id'], axis=1)
     # 标准归一化--和测试集一起做归一化--FIXME--去除归一化后由1.08992提升到1.08988
-    # length = len(train_data)
-    # cols_names = train_data.columns
-    # all_data = pd.concat([train_data, test_data])
+    length = len(train_data)
+    cols_names = train_data.columns
+    # 特征工程，处理nan值-- 1.08912提升到1.08899，说明某些字段的nan值是对预测结果有影响的
+    all_data = pd.concat([train_data, test_data])
+    for col in cols_names:
+        all_data = nan_to_mean(all_data, col, -1)
     # scaler = StandardScaler()
     # all_data = scaler.fit_transform(all_data)
-    # # 重新分为训练集和测试集
-    # train_data = pd.DataFrame(all_data, columns=cols_names).iloc[0:length, :]
-    # test_data = pd.DataFrame(all_data, columns=cols_names).iloc[length:, :]
+    # 重新分为训练集和测试集
+    train_data = pd.DataFrame(all_data, columns=cols_names).iloc[0:length, :]
+    test_data = pd.DataFrame(all_data, columns=cols_names).iloc[length:, :]
     # print_dp(train_data.head())
     # print_dp(test_data.head())
     # 训练
@@ -177,23 +268,10 @@ def main():
     output.to_csv('output.csv', index=False)
 
 
-def main2():
-    train_org_data = pd.read_csv(TRAIN_PATH)
-    test_org_data = pd.read_csv(TEST_PATH)
-    train_data = train_org_data.drop(['Policy Start Date'], axis=1)
-    test_data = test_org_data.drop(['Policy Start Date'], axis=1)
-    # 区分值
-    train_label = train_data.loc[:, ['Premium Amount']]
-    train_data = train_data.drop(['Premium Amount'], axis=1)
-    test_id = test_data.loc[:, ['id']]
-    test_data = test_data.drop(['id'], axis=1)
-    bst = train_with_categorical_feature(train_data, train_label)
-    bst.save_model('model2.txt', num_iteration=bst.best_iteration)
-    # 预测
-    predictions = predict(lgb.Dataset(test_data), 'model2.txt')
-    test_id['Premium Amount'] = predictions
-    output = pd.DataFrame(test_id, columns=['id', 'Premium Amount'])
-    output.to_csv('output.csv', index=False)
+# main 主函数
+def main():
+    test_data, test_id = train_by_nn()
+    nn_pred(test_data, test_id)
 
 
 
