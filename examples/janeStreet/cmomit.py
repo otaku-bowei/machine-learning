@@ -12,6 +12,8 @@ import tensorflow_decision_forests as tfd
 import kaggle_evaluation.jane_street_inference_server
 import os
 
+import joblib
+
 # Gather the train data partitions
 DATA_DIR = Path('/kaggle/input/jane-street-real-time-market-data-forecasting')
 N_PARTITION = len(os.listdir(DATA_DIR / 'train.parquet'))
@@ -53,7 +55,7 @@ def online_learning_by_symbol(train_d: pd.DataFrame, model: SGDRegressor() = Non
         # print(date_id)
         # 对数据进行区分
         train_data = train_d_tmp.drop(
-            columns=['date_id', 'time_id', 'symbol_id', 'responder_0', 'responder_1', 'responder_2', 'responder_3',
+            columns=['date_id', 'weight', 'time_id', 'symbol_id', 'responder_0', 'responder_1', 'responder_2', 'responder_3',
                      'responder_4', 'responder_5',
                      'responder_6', 'responder_7', 'responder_8'])
         train_label = train_d_tmp.loc[:, ['responder_6']]
@@ -63,13 +65,31 @@ def online_learning_by_symbol(train_d: pd.DataFrame, model: SGDRegressor() = Non
         train_numpy = train_data.to_numpy()
         test_numpy = train_label.to_numpy().ravel()
         model.partial_fit(train_numpy, test_numpy)
+    return model
 
 
 model_init = SGDRegressor()
 
 
+def read_lags_data() -> pd.DataFrame:
+    lags_l = pd.read_parquet(lags_file)
+    return lags_l
+
+
+lags = read_lags_data()
+for i in range(1):
+    train_data = read_org_train_data(i)
+    model_init = online_learning_by_symbol(train_data, model_init)
+    joblib.dump(model_init, './xgb_model_group.pkl')
+    print("Saved the model group to xgb_model_group.pkl")
+
+model_pre = joblib.load("./xgb_model_group.pkl")
+
 def online_predict(test_data: pd.DataFrame, model: SGDRegressor()) -> pd.DataFrame:
-    test_data_tmp = test_data.drop(columns=['row_id', 'date_id', 'time_id', 'symbol_id', 'is_scored'])
+    print("try test")
+    FEAT_COLS = [f"feature_{i:02d}" for i in range(79)]
+    test_data_tmp = test_data[FEAT_COLS]
+    # test_data_tmp = test_data.drop(columns=['row_id', 'date_id', 'time_id', 'symbol_id', 'is_scored'])
     length = len(test_data) / 39
     result = np.ndarray
     for i in tqdm(range(0, int(length))):
@@ -83,24 +103,12 @@ def online_predict(test_data: pd.DataFrame, model: SGDRegressor()) -> pd.DataFra
         else:
             result = np.append(result, y_pred)
         # test_data.loc[i : i + 39, 'responder_6'] = y_pred
-    test_data['responder_6'] = result
-    return test_data.loc[:, ['row_id', 'responder_6']]
+    print(result)
+    return result
+    #test_data['responder_6'] = result
+    #print(test_data.head())
+    #return test_data.loc[:, ['row_id', 'responder_6']]
 
-
-
-def read_lags_data() -> pd.DataFrame:
-    lags_l = pd.read_parquet(lags_file)
-    return lags_l
-
-
-lags = read_lags_data()
-for i in range(N_PARTITION):
-    train_data = read_org_train_data(0)
-    online_learning_by_symbol(train_data, model_init)
-# test_data = read_org_test_data()
-# test_data = online_predict(test_data, model)
-# output = predict(pl.from_pandas(test_data), None).to_pandas()
-# output.to_csv('submission.csv', index=False)
 
 # Replace this function with your inference code.
 # You can return either a Pandas or Polars dataframe, though Polars is recommended.
@@ -112,7 +120,11 @@ def predict(test: pl.DataFrame, lags: pl.DataFrame | None) -> pl.DataFrame | pd.
     global lags_
     if lags is not None:
         lags_ = lags
-    predictions = online_predict(test, model_init)
+    data_dict = test.to_dict()
+    # 使用字典创建一个 pandas.DataFrame 对象
+    pd_df = pd.DataFrame(data_dict)
+    pred = online_predict(pd_df, model_pre)
+    predictions = test.select('row_id').with_columns(pl.Series('responder_6', pred.ravel()))
     if isinstance(predictions, pl.DataFrame):
         assert predictions.columns == ['row_id', 'responder_6']
     elif isinstance(predictions, pd.DataFrame):
@@ -121,6 +133,7 @@ def predict(test: pl.DataFrame, lags: pl.DataFrame | None) -> pl.DataFrame | pd.
         raise TypeError('The predict function must return a DataFrame')
     # Confirm has as many rows as the test data.
     assert len(predictions) == len(test)
+    print(predictions.head())
     return predictions
 
 
@@ -137,5 +150,4 @@ else:
         )
     )
 
-submission = pl.read_parquet("/kaggle/working/submission.parquet")
-submission
+

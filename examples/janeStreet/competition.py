@@ -153,7 +153,7 @@ def online_predict(test_data : pd.DataFrame, model : SGDRegressor()) -> pd.DataF
         else:
             result = np.append(result, y_pred)
         # test_data.loc[i : i + 39, 'responder_6'] = y_pred
-    test_data['responder_6'] = result
+    test_data.loc[:, 'responder_6'] = result
     return test_data.loc[:, ['row_id', 'responder_6']]
 
 def nn(train_d, train_l: pd.DataFrame):
@@ -287,7 +287,7 @@ def plot_by_period(df, days, column, symbols=None, time_id_ranges=None, color_by
 
         plt.show()
 
-
+model_pre = joblib.load("./xgb_model_group.pkl")
 # Replace this function with your inference code.
 # You can return either a Pandas or Polars dataframe, though Polars is recommended.
 # Each batch of predictions (except the very first) must be returned within 1 minute of the batch features being provided.
@@ -307,6 +307,7 @@ def predict(test: pl.DataFrame, lags: pl.DataFrame | None) -> pl.DataFrame | pd.
     data_dict = test.to_dict()
     # 使用字典创建一个 pandas.DataFrame 对象
     pd_df = pd.DataFrame(data_dict)
+    pred = online_predict(pd_df, model_pre)
     predictions = online_predict(pd_df, model)
     if isinstance(predictions, pl.DataFrame):
         assert predictions.columns == ['row_id', 'responder_6']
