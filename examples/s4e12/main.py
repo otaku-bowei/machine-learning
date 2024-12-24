@@ -2,6 +2,12 @@
 id,Age,Gender,Annual Income,Marital Status,Number of Dependents,Education Level,Occupation,Health Score,Location,Policy Type,Previous Claims,Vehicle Age,Credit Score,Insurance Duration,Policy Start Date,Customer Feedback,Smoking Status,Exercise Frequency,Property Type,Premium Amount
 身份证，年龄，性别，年收入，婚姻状况，受抚养人数，教育水平，职业，健康评分，地点，保单类型，以前的索赔，车龄，信用评分，保险期限，保单开始日期，客户反馈，吸烟状况，运动频率，财产类型，保费金额
 '''
+import sklearn.metrics
+
+'''
+1.nn训练后发现loss超高，输出值都一样--https://www.zhihu.com/question/390693207/answer/3197389090--（1）梯度爆炸（2）死亡relu（3）学习率过大（4）过拟合
+    --填充了nan值，应该是relu死亡，nan值导致数据一直为负数
+'''
 
 
 '''
@@ -54,6 +60,7 @@ ONE_HOT_FIELD = ['Gender', 'Marital Status', 'Education Level', 'Occupation', 'P
 NP_FIELD = ['Age', 'Annual Income', 'Number of Dependents', 'Health Score', 'Premium Amount', 'Policy Start Date']
 TEST_NP_FIELD = ['Age', 'Annual Income', 'Number of Dependents', 'Health Score', 'id', 'Policy Start Date']
 CATEGORICAL_FEATURE = ['Gender', 'Marital Status', 'Education Level', 'Occupation', 'Location',  'Policy Type', 'Customer Feedback', 'Smoking Status', 'Exercise Frequency', 'Property Type']
+FILL_NAN_FIELD = ['Age', 'Annual Income', 'Number of Dependents', 'Health Score']
 params = {
     'bagging_freq': 5,
     'bagging_fraction': 1.0,
@@ -88,7 +95,11 @@ def train(train_data, train_label: pd.DataFrame):
     data = lgb.Dataset(train_d, label=train_l)
     valid = lgb.Dataset(valid_d, label=valid_l)
     # 添加交叉验证，评分直接 2.81342提升到1.09089
-    bst = lgb.train(params, data, num_boost_round=200, valid_sets=valid)
+    bst = lgb.train(params, data, num_boost_round=100, valid_sets=[valid], )
+    # 获取评估指标值
+    bst.save_model('model.txt', num_iteration=bst.best_iteration)
+    # loss计算
+    loss_cul(valid_d, valid_l, 'model.txt')
     return bst
 
 
@@ -105,6 +116,7 @@ def train_with_categorical_feature(train_data, train_label : pd.DataFrame):
     valid = lgb.Dataset(valid_d, label=valid_l, categorical_feature=CATEGORICAL_FEATURE)
     # 添加交叉验证，评分直接 2.81342提升到1.09089
     bst = lgb.train(params, data, num_boost_round=200, valid_sets=valid)
+    bst.best_score()
     return bst
 
 
@@ -122,17 +134,29 @@ def predict(data: lgb.Dataset, model_name: string):
     return y_pred
 
 
+# loss_cul 计算回归的loss值
+def loss_cul(data, label: pd.DataFrame, model_name: string):
+    # d = lgb.Dataset(data=data, label=label)
+    y_pred = predict(data, model_name)
+    l_np = label.to_numpy()
+    loss = sklearn.metrics.mean_squared_error(l_np, y_pred)
+    print(loss)
+
+
+
 # precision_fix 精度扩展，对某些字段进行精度扩展字段--对决策树处理回归问题有帮助
 def precision_fix():
     print()
 
 
 # nan_to_mean 某些列的 nan 是有意义的，将其标识为平均值，TODO--并用标识列标注该值
-def nan_to_mean(data: pd.DataFrame, field: string, num: int = None) -> pd.DataFrame:
+def nan_to_mean(data: pd.DataFrame, field: string, num: float = None) -> pd.DataFrame:
     if num is None:
-        data.fillna(data.mean(), inplace=True)
+        data.loc[:, field] = data[field].fillna(data[field].mean())
     else:
-        data.fillna(num, inplace=True)
+        data.loc[:, field] = data[field].fillna(num)
+    data[field + '_is_nan'] = data[field].isna().astype(int)
+    col_names = data.columns
     return data
 
 
@@ -147,7 +171,7 @@ def date_fix(data: pd.DataFrame, field: string) -> pd.DataFrame:
     return data.drop([field], axis=1)
 
 
-def train_by_nn():
+def train_by_nn(model: tf.keras.models.Sequential = None):
     # 1.预处理数据
     train_org_data = pd.read_csv(TRAIN_PATH)
     test_org_data = pd.read_csv(TEST_PATH)
@@ -156,9 +180,11 @@ def train_by_nn():
     # 对'Marital Status', 'Education Level', 'Occupation', 'Policy Type', 'Property Type'字段进行独热编码
     # TODO--lightgbm原生支持分类编码而无需进行one-hot编码——categorical_feature参数
     train_data = one_hot_fix(train_data, train_org_data, CATEGORICAL_FEATURE)
-    train_data = date_fix(train_data, 'Policy Start Date')
+    # train_data = date_fix(train_data, 'Policy Start Date')
+    train_data = train_data.drop('Policy Start Date', axis=1)
     test_data = one_hot_fix(test_data, test_org_data, CATEGORICAL_FEATURE)
-    test_data = date_fix(test_data, 'Policy Start Date')
+    # test_data = date_fix(test_data, 'Policy Start Date')
+    test_data = test_data.drop('Policy Start Date', axis=1)
     # 乱序
     train_data = pd.DataFrame(train_data)
     # 提取label
@@ -168,32 +194,47 @@ def train_by_nn():
     test_data = test_data.drop(['id'], axis=1)
     # 标准归一化--和测试集一起做归一化
     length = len(train_data)
-    cols_names = train_data.columns
     # 特征工程，处理nan值-- 1.08912提升到1.08899，说明某些字段的nan值是对预测结果有影响的
     all_data = pd.concat([train_data, test_data])
-    # for col in cols_names:
-    #     all_data = nan_to_mean(all_data, col, -1)
+    for col in FILL_NAN_FIELD:
+        all_data = nan_to_mean(all_data, col, -1)
+    cols_names = all_data.columns
     scaler = StandardScaler()
     all_data = scaler.fit_transform(all_data)
     # 重新分为训练集和测试集
     train_data = pd.DataFrame(all_data, columns=cols_names).iloc[0:length, :]
     test_data = pd.DataFrame(all_data, columns=cols_names).iloc[length:, :]
-    model = tf.keras.models.Sequential([
-        tf.keras.layers.Flatten(input_shape=(len(cols_names), )),
-        tf.keras.layers.Dense(64, activation='relu'),
-        tf.keras.layers.Dropout(0.2),
-        tf.keras.layers.Dense(128, activation='relu'),
-        # 丢弃部分神经元梯度下降更稳定，防止梯度消失
-        tf.keras.layers.Dropout(0.2),
-        tf.keras.layers.Dense(32, activation='relu'),
-        tf.keras.layers.Dense(1)
-    ])
-    model.compile(optimizer='adam', loss='mean_squared_error')
+
+    # 区分训练集和验证集
+    length = len(train_data)
+    index = int(length * 0.8)
+    train_d = train_data.loc[:index, :]
+    valid_d = train_data.loc[index:, :]
+    train_l = train_label.loc[:index, :]
+    valid_l = train_label.loc[index:, :]
+
+    if model is None:
+        model = tf.keras.models.Sequential([
+            # tf.keras.layers.Flatten(input_shape=(len(cols_names),)),
+            tf.keras.layers.Dense(64, activation='relu'),
+            tf.keras.layers.Dropout(0.2),
+            tf.keras.layers.Dense(128, activation='relu'),
+            tf.keras.layers.Dense(32, activation='relu'),
+            # 丢弃部分神经元梯度下降更稳定，防止梯度消失--如果没有正确使用dropout（例如，没有关闭dropout），全连接层神经元会全部处于激活状态，导致预测结果相同‌
+            tf.keras.layers.Dropout(0.2),
+            tf.keras.layers.Dense(1)
+        ])
+    loss_fn = tf.keras.losses.MeanSquaredError()
+    model.compile(optimizer='adam', loss=loss_fn, metrics=['mse'])
     # 4.2定义tensorBoard
-    tensorboard_callback = tb.draw_board('mnist')
+    tensorboard_callback = tb.draw_board('s4e12')
     # 5.进行训练
-    # model.fit(train_data, train_label, epochs=10, callbacks=[tensorboard_callback])
-    # model.save('nn_model.keras')
+    model.fit(train_d, train_l, epochs=2, callbacks=[tensorboard_callback])
+    model.save('nn_model.keras')
+    # 6.loss计算--抽取0.2的训练集作为验证
+    y_pred = model.predict(valid_d)
+    loss = sklearn.metrics.mean_squared_error(valid_l, y_pred)
+    print(loss)
     return test_data, test_id
 
 
@@ -246,32 +287,34 @@ def train_by_lightgbm():
     test_data = test_data.drop(['id'], axis=1)
     # 标准归一化--和测试集一起做归一化--FIXME--去除归一化后由1.08992提升到1.08988
     length = len(train_data)
-    cols_names = train_data.columns
-    # 特征工程，处理nan值-- 1.08912提升到1.08899，说明某些字段的nan值是对预测结果有影响的
+    # 特征工程，处理nan值-- 1.08912提升到1.08889，说明某些字段的nan值是对预测结果有影响的
     all_data = pd.concat([train_data, test_data])
-    for col in cols_names:
-        all_data = nan_to_mean(all_data, col, -1)
+    for col in FILL_NAN_FIELD:
+        all_data = nan_to_mean(all_data, col, 0)
     # scaler = StandardScaler()
     # all_data = scaler.fit_transform(all_data)
     # 重新分为训练集和测试集
+    cols_names = all_data.columns
     train_data = pd.DataFrame(all_data, columns=cols_names).iloc[0:length, :]
     test_data = pd.DataFrame(all_data, columns=cols_names).iloc[length:, :]
     # print_dp(train_data.head())
     # print_dp(test_data.head())
     # 训练
     bst = train(train_data, train_label)
-    bst.save_model('model.txt', num_iteration=bst.best_iteration)
     # 预测
     predictions = predict(test_data, 'model.txt')
     test_id['Premium Amount'] = predictions
     output = pd.DataFrame(test_id, columns=['id', 'Premium Amount'])
     output.to_csv('output.csv', index=False)
+    # loss--1184999.9169039582
 
 
 # main 主函数
 def main():
+    # test_data, test_id = train_by_nn(tf.keras.models.load_model('nn_model.keras'))
     test_data, test_id = train_by_nn()
-    nn_pred(test_data, test_id)
+    # train_by_lightgbm()
+    # nn_pred(test_data, test_id)
 
 
 
