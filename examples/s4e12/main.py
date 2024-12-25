@@ -20,7 +20,7 @@ lightgbm特性
 '''
 import string
 from multiprocessing import cpu_count
-
+import tool.matplotlib.field_analysis as fa
 import tensorflow as tf
 import numpy as np
 import pandas as pd
@@ -56,6 +56,7 @@ def read_csv(file_path: string) -> pd.DataFrame:
 
 TRAIN_PATH = './train.csv'
 TEST_PATH = './test.csv'
+IMPORTAMT_FIELD = ['Health Score', 'Annual Income', 'Age']
 ONE_HOT_FIELD = ['Gender', 'Marital Status', 'Education Level', 'Occupation', 'Policy Type', 'Property Type']
 NP_FIELD = ['Age', 'Annual Income', 'Number of Dependents', 'Health Score', 'Premium Amount', 'Policy Start Date']
 TEST_NP_FIELD = ['Age', 'Annual Income', 'Number of Dependents', 'Health Score', 'id', 'Policy Start Date']
@@ -139,7 +140,7 @@ def loss_cul(data, label: pd.DataFrame, model_name: string):
     # d = lgb.Dataset(data=data, label=label)
     y_pred = predict(data, model_name)
     l_np = label.to_numpy()
-    loss = sklearn.metrics.mean_squared_error(l_np, y_pred)
+    loss = sklearn.metrics.root_mean_squared_error(l_np, y_pred)
     print(loss)
 
 
@@ -233,10 +234,69 @@ def train_by_nn(model: tf.keras.models.Sequential = None):
     model.save('nn_model.keras')
     # 6.loss计算--抽取0.2的训练集作为验证
     y_pred = model.predict(valid_d)
-    loss = sklearn.metrics.mean_squared_error(valid_l, y_pred)
+    loss = sklearn.metrics.root_mean_squared_error(valid_l, y_pred)
     print(loss)
     return test_data, test_id
 
+
+# train_by_nn_symbol_field 根据gbdt训练结果，挑选关键的几个字段进行nn训练
+def train_by_nn_symbol_field(model: tf.keras.models.Sequential = None):
+    # 1.预处理数据
+    train_org_data = pd.read_csv(TRAIN_PATH)
+    test_org_data = pd.read_csv(TEST_PATH)
+    train_fields = ['Health Score', 'Annual Income', 'Age', 'Premium Amount']
+    test_fields = ['Health Score', 'Annual Income', 'Age', 'id']
+    train_data = train_org_data.loc[:, train_fields]
+    test_data = test_org_data.loc[:,  test_fields]
+    # 乱序
+    train_data = pd.DataFrame(train_data)
+    # 提取label
+    train_label = train_data.loc[:, ['Premium Amount']]
+    train_data = train_data.drop(['Premium Amount'], axis=1)
+    test_id = test_data.loc[:, ['id']]
+    test_data = test_data.drop(['id'], axis=1)
+    # 标准归一化--和测试集一起做归一化
+    length = len(train_data)
+    all_data = pd.concat([train_data, test_data])
+    for col in IMPORTAMT_FIELD:
+        all_data = nan_to_mean(all_data, col)
+    cols_names = all_data.columns
+    scaler = StandardScaler()
+    all_data = scaler.fit_transform(all_data)
+    # 重新分为训练集和测试集
+    train_data = pd.DataFrame(all_data, columns=cols_names).iloc[0:length, :]
+    test_data = pd.DataFrame(all_data, columns=cols_names).iloc[length:, :]
+    # 区分训练集和验证集
+    length = len(train_data)
+    index = int(length * 0.8)
+    train_d = train_data.loc[:index, :]
+    valid_d = train_data.loc[index:, :]
+    train_l = train_label.loc[:index, :]
+    valid_l = train_label.loc[index:, :]
+
+    if model is None:
+        model = tf.keras.models.Sequential([
+            # tf.keras.layers.Flatten(input_shape=(len(cols_names),)),
+            tf.keras.layers.Dense(64, activation='relu'),
+            tf.keras.layers.Dropout(0.2),
+            tf.keras.layers.Dense(128, activation='relu'),
+            tf.keras.layers.Dense(32, activation='relu'),
+            # 丢弃部分神经元梯度下降更稳定，防止梯度消失--如果没有正确使用dropout（例如，没有关闭dropout），全连接层神经元会全部处于激活状态，导致预测结果相同‌
+            tf.keras.layers.Dropout(0.2),
+            tf.keras.layers.Dense(1)
+        ])
+    loss_fn = tf.keras.losses.MeanSquaredError()
+    model.compile(optimizer='adam', loss=loss_fn, metrics=['mse'])
+    # 4.2定义tensorBoard
+    tensorboard_callback = tb.draw_board('s4e12')
+    # 5.进行训练
+    model.fit(train_d, train_l, epochs=2, callbacks=[tensorboard_callback])
+    model.save('nn2_model.keras')
+    # 6.loss计算--抽取0.2的训练集作为验证
+    y_pred = model.predict(valid_d)
+    loss = sklearn.metrics.root_mean_squared_error(valid_l, y_pred)
+    print(loss)
+    return test_data, test_id
 
 
 def nn_pred(test_data, test_id: pd.DataFrame):
@@ -291,10 +351,10 @@ def train_by_lightgbm():
     all_data = pd.concat([train_data, test_data])
     for col in FILL_NAN_FIELD:
         all_data = nan_to_mean(all_data, col, 0)
+    cols_names = all_data.columns
     # scaler = StandardScaler()
     # all_data = scaler.fit_transform(all_data)
     # 重新分为训练集和测试集
-    cols_names = all_data.columns
     train_data = pd.DataFrame(all_data, columns=cols_names).iloc[0:length, :]
     test_data = pd.DataFrame(all_data, columns=cols_names).iloc[length:, :]
     # print_dp(train_data.head())
@@ -309,11 +369,18 @@ def train_by_lightgbm():
     # loss--1184999.9169039582
 
 
+
+def analysis_data(data: pd.DataFrame):
+    fa.nan_compare(data, True, 'Occupation', 'Premium Amount')
+
 # main 主函数
 def main():
     # test_data, test_id = train_by_nn(tf.keras.models.load_model('nn_model.keras'))
-    test_data, test_id = train_by_nn()
-    # train_by_lightgbm()
+    # test_data, test_id = train_by_nn()
+    # test_data, test_id = train_by_nn_symbol_field()
+    train_by_lightgbm()
+    # train_org_data = pd.read_csv(TRAIN_PATH)
+    # analysis_data(train_org_data)
     # nn_pred(test_data, test_id)
 
 
