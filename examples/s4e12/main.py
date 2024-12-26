@@ -371,16 +371,17 @@ def train_by_lightgbm():
 
 
 def analysis_data(data: pd.DataFrame):
-    fa.nan_compare(data, True, 'Occupation', 'Premium Amount')
+    # fa.nan_compare(data, True, 'Occupation', 'Premium Amount')
+    fa.nan_compare(data, False, 'Age', 'Premium Amount')
 
 # main 主函数
 def main():
     # test_data, test_id = train_by_nn(tf.keras.models.load_model('nn_model.keras'))
     # test_data, test_id = train_by_nn()
     # test_data, test_id = train_by_nn_symbol_field()
-    train_by_lightgbm()
-    # train_org_data = pd.read_csv(TRAIN_PATH)
-    # analysis_data(train_org_data)
+    # train_by_lightgbm()
+    train_org_data = pd.read_csv(TRAIN_PATH)
+    analysis_data(train_org_data)
     # nn_pred(test_data, test_id)
 
 
