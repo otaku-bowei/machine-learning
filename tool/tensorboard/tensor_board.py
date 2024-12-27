@@ -13,3 +13,8 @@ def draw_board(path: string) -> keras.src.callbacks.TensorBoard:
     log_dir = current_file_abs_path + "/" + path + "/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
     return tensorboard_callback
+
+
+
+def save_matplotlib():
+    print()
