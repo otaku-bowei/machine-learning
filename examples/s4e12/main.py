@@ -2,6 +2,8 @@
 id,Age,Gender,Annual Income,Marital Status,Number of Dependents,Education Level,Occupation,Health Score,Location,Policy Type,Previous Claims,Vehicle Age,Credit Score,Insurance Duration,Policy Start Date,Customer Feedback,Smoking Status,Exercise Frequency,Property Type,Premium Amount
 身份证，年龄，性别，年收入，婚姻状况，受抚养人数，教育水平，职业，健康评分，地点，保单类型，以前的索赔，车龄，信用评分，保险期限，保单开始日期，客户反馈，吸烟状况，运动频率，财产类型，保费金额
 '''
+from enum import Enum
+
 import sklearn.metrics
 from hillclimbers import climb_hill, partial
 from sklearn.compose import ColumnTransformer
@@ -136,6 +138,23 @@ def train(train_data, train_label: pd.DataFrame):
     return bst
 
 
+class CulType(Enum):
+    DIVISE = '/',
+    PLUS = '+'
+
+
+# interaction_features 交互特征
+def interaction_features(data: pd.DataFrame, field1, field2: str, type: CulType):
+    name = field1 + '-' + field2
+    if type == CulType.PLUS:
+        data[name] = data[field1] + data[field2]
+    elif type == CulType.DIVISE:
+        data[name] = data[field1] / data[field2]
+    return data
+
+
+
+
 def train_with_categorical_feature(train_data, train_label: pd.DataFrame):
     # 将训练集分为训练数据和交叉验证数据
     length = len(train_data)
@@ -250,6 +269,11 @@ def train_by_nn(model: tf.keras.models.Sequential = None):
     all_data = pd.concat([train_data, test_data])
     for col in FILL_NAN_FIELD:
         all_data = nan_to_mean(all_data, col, -1)
+
+    # 'Annual Income', 'Number of Dependents', 'Previous Claims', 'Health Score', 'Premium Amount'
+    all_data = interaction_features(all_data, 'Annual Income', 'Age', CulType.DIVISE)
+    all_data = interaction_features(all_data, 'Health Score', 'Age', CulType.DIVISE)
+    all_data = interaction_features(all_data, 'Annual Income', 'Previous Claims', CulType.PLUS)
     cols_names = all_data.columns
     scaler = StandardScaler()
     all_data = scaler.fit_transform(all_data)
@@ -281,7 +305,7 @@ def train_by_nn(model: tf.keras.models.Sequential = None):
     # 4.2定义tensorBoard
     tensorboard_callback = tb.draw_board('s4e12')
     # 5.进行训练
-    model.fit(train_d, train_l, epochs=10, callbacks=[tensorboard_callback])
+    model.fit(train_data, train_label, epochs=5, callbacks=[tensorboard_callback])
     model.save('nn_model.keras')
     # 6.loss计算--抽取0.2的训练集作为验证
     y_pred = model.predict(valid_d)
