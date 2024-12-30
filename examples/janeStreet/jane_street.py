@@ -258,6 +258,7 @@ def predict_test_data(test_data, test_lable: pd.DataFrame):
     output.to_csv('submission.csv', index=False)
 
 
+
 # main 主函数
 def main():
     # 1.pd读取数据集，提取相关有用信息并做数据预处理
