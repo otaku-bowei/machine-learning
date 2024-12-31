@@ -1,7 +1,4 @@
-'''
-id,Age,Gender,Annual Income,Marital Status,Number of Dependents,Education Level,Occupation,Health Score,Location,Policy Type,Previous Claims,Vehicle Age,Credit Score,Insurance Duration,Policy Start Date,Customer Feedback,Smoking Status,Exercise Frequency,Property Type,Premium Amount
-身份证，年龄，性别，年收入，婚姻状况，受抚养人数，教育水平，职业，健康评分，地点，保单类型，以前的索赔，车龄，信用评分，保险期限，保单开始日期，客户反馈，吸烟状况，运动频率，财产类型，保费金额
-'''
+
 from enum import Enum
 
 import sklearn.metrics
@@ -30,7 +27,7 @@ import tool.matplotlib.field_analysis as fa
 import tensorflow as tf
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import OneHotEncoder, StandardScaler, OrdinalEncoder
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, OrdinalEncoder, MinMaxScaler
 import tool.tensorboard.tensor_board as tb
 from tqdm import tqdm
 import lightgbm as lgb
@@ -64,17 +61,22 @@ def read_csv(file_path: string) -> pd.DataFrame:
     return df
 
 
+
+'''
+id,Age,Gender,Annual Income,Marital Status,Number of Dependents,Education Level,Occupation,Health Score,Location,Policy Type,Previous Claims,Vehicle Age,Credit Score,Insurance Duration,Policy Start Date,Customer Feedback,Smoking Status,Exercise Frequency,Property Type,Premium Amount
+身份证，年龄，性别，年收入，婚姻状况，受抚养人数，教育水平，职业，健康评分，地点，保单类型，以前的索赔，车龄，信用评分，保险期限，保单开始日期，客户反馈，吸烟状况，运动频率，财产类型，保费金额
+'''
 TRAIN_PATH = './train.csv'
 TEST_PATH = './test.csv'
 IMPORTAMT_FIELD = ['Health Score', 'Annual Income', 'Age']
 ONE_HOT_FIELD = ['Gender', 'Marital Status', 'Education Level', 'Occupation', 'Policy Type', 'Property Type']
 NP_FIELD = ['Age', 'Annual Income', 'Number of Dependents', 'Previous Claims', 'Health Score', 'Premium Amount',
-            'Policy Start Date', 'nan_count']
+            'Policy Start Date', 'Vehicle Age', 'Credit Score', 'Insurance Duration', 'nan_count']
 TEST_NP_FIELD = ['Age', 'Annual Income', 'Number of Dependents', 'Previous Claims', 'Health Score', 'id',
-                 'Policy Start Date', 'nan_count']
+                 'Policy Start Date', 'Vehicle Age', 'Credit Score', 'Insurance Duration', 'nan_count']
 CATEGORICAL_FEATURE = ['Gender', 'Marital Status', 'Education Level', 'Occupation', 'Location', 'Policy Type',
                        'Customer Feedback', 'Smoking Status', 'Exercise Frequency', 'Property Type']
-FILL_NAN_FIELD = ['Age', 'Annual Income', 'Number of Dependents', 'Health Score','Previous Claims']
+FILL_NAN_FIELD = ['Age', 'Annual Income', 'Number of Dependents', 'Health Score', 'Previous Claims', 'Vehicle Age', 'Credit Score', 'Insurance Duration', ]
 params = {
     'bagging_freq': 5,
     'bagging_fraction': 1.0,
@@ -201,11 +203,6 @@ def log_data(data: pd.DataFrame, field_name: str):
     return data
 
 
-# precision_fix 精度扩展，对某些字段进行精度扩展字段--对决策树处理回归问题有帮助
-def precision_fix():
-    print()
-
-
 # nan_to_mean 某些列的 nan 是有意义的，将其标识为平均值，TODO--并用标识列标注该值
 def nan_to_mean(data: pd.DataFrame, field: string, num: float = None) -> pd.DataFrame:
     if num is None:
@@ -269,13 +266,13 @@ def train_by_nn(model: tf.keras.models.Sequential = None):
     all_data = pd.concat([train_data, test_data])
     for col in FILL_NAN_FIELD:
         all_data = nan_to_mean(all_data, col, -1)
-
     # 'Annual Income', 'Number of Dependents', 'Previous Claims', 'Health Score', 'Premium Amount'
     all_data = interaction_features(all_data, 'Annual Income', 'Age', CulType.DIVISE)
     all_data = interaction_features(all_data, 'Health Score', 'Age', CulType.DIVISE)
     all_data = interaction_features(all_data, 'Annual Income', 'Previous Claims', CulType.PLUS)
     cols_names = all_data.columns
     scaler = StandardScaler()
+    # scaler = MinMaxScaler()
     all_data = scaler.fit_transform(all_data)
     # 重新分为训练集和测试集
     train_data = pd.DataFrame(all_data, columns=cols_names).iloc[0:length, :]
@@ -307,68 +304,8 @@ def train_by_nn(model: tf.keras.models.Sequential = None):
     # 4.2定义tensorBoard
     tensorboard_callback = tb.draw_board('s4e12')
     # 5.进行训练
-    model.fit(train_data, train_label, epochs=100, callbacks=[tensorboard_callback])
+    model.fit(train_data, train_label, epochs=5, callbacks=[tensorboard_callback])
     model.save('nn_model.keras')
-    # 6.loss计算--抽取0.2的训练集作为验证
-    y_pred = model.predict(valid_d)
-    loss = sklearn.metrics.root_mean_squared_log_error(valid_l, y_pred)
-    print(loss)
-    return test_data, test_id
-
-
-# train_by_nn_symbol_field 根据gbdt训练结果，挑选关键的几个字段进行nn训练
-def train_by_nn_symbol_field(model: tf.keras.models.Sequential = None):
-    # 1.预处理数据
-    train_org_data = pd.read_csv(TRAIN_PATH)
-    test_org_data = pd.read_csv(TEST_PATH)
-    train_fields = ['Health Score', 'Annual Income', 'Age', 'Premium Amount']
-    test_fields = ['Health Score', 'Annual Income', 'Age', 'id']
-    train_data = train_org_data.loc[:, train_fields]
-    test_data = test_org_data.loc[:, test_fields]
-    # 乱序
-    train_data = pd.DataFrame(train_data)
-    # 提取label
-    train_label = train_data.loc[:, ['Premium Amount']]
-    train_data = train_data.drop(['Premium Amount'], axis=1)
-    test_id = test_data.loc[:, ['id']]
-    test_data = test_data.drop(['id'], axis=1)
-    # 标准归一化--和测试集一起做归一化
-    length = len(train_data)
-    all_data = pd.concat([train_data, test_data])
-    for col in IMPORTAMT_FIELD:
-        all_data = nan_to_mean(all_data, col)
-    cols_names = all_data.columns
-    scaler = StandardScaler()
-    all_data = scaler.fit_transform(all_data)
-    # 重新分为训练集和测试集
-    train_data = pd.DataFrame(all_data, columns=cols_names).iloc[0:length, :]
-    test_data = pd.DataFrame(all_data, columns=cols_names).iloc[length:, :]
-    # 区分训练集和验证集
-    length = len(train_data)
-    index = int(length * 0.8)
-    train_d = train_data.loc[:index, :]
-    valid_d = train_data.loc[index:, :]
-    train_l = train_label.loc[:index, :]
-    valid_l = train_label.loc[index:, :]
-
-    if model is None:
-        model = tf.keras.models.Sequential([
-            # tf.keras.layers.Flatten(input_shape=(len(cols_names),)),
-            tf.keras.layers.Dense(64, activation='relu'),
-            tf.keras.layers.Dropout(0.2),
-            tf.keras.layers.Dense(128, activation='relu'),
-            tf.keras.layers.Dense(32, activation='relu'),
-            # 丢弃部分神经元梯度下降更稳定，防止梯度消失--如果没有正确使用dropout（例如，没有关闭dropout），全连接层神经元会全部处于激活状态，导致预测结果相同‌
-            tf.keras.layers.Dropout(0.2),
-            tf.keras.layers.Dense(1)
-        ])
-    # loss_fn = tf.keras.losses.MeanSquaredError()
-    model.compile(optimizer='adam', loss=RMSLE(), metrics=['mse'])
-    # 4.2定义tensorBoard
-    tensorboard_callback = tb.draw_board('s4e12')
-    # 5.进行训练
-    model.fit(train_d, train_l, epochs=2, callbacks=[tensorboard_callback])
-    model.save('nn2_model.keras')
     # 6.loss计算--抽取0.2的训练集作为验证
     y_pred = model.predict(valid_d)
     loss = sklearn.metrics.root_mean_squared_log_error(valid_l, y_pred)
@@ -409,25 +346,6 @@ class RMSLE(tf.keras.losses.Loss):
         return tf.sqrt(mse)
 
 
-def train_without_one_hot():
-    train_org_data = pd.read_csv(TRAIN_PATH)
-    test_org_data = pd.read_csv(TEST_PATH)
-    train_data = train_org_data.drop(['Policy Start Date'], axis=1)
-    test_data = test_org_data.drop(['Policy Start Date'], axis=1)
-    # 区分值
-    train_label = train_data.loc[:, ['Premium Amount']]
-    train_data = train_data.drop(['Premium Amount'], axis=1)
-    test_id = test_data.loc[:, ['id']]
-    test_data = test_data.drop(['id'], axis=1)
-    bst = train_with_categorical_feature(train_data, train_label)
-    bst.save_model('model2.txt', num_iteration=bst.best_iteration)
-    # 预测
-    predictions = predict(lgb.Dataset(test_data), 'model2.txt')
-    test_id['Premium Amount'] = predictions
-    output = pd.DataFrame(test_id, columns=['id', 'Premium Amount'])
-    output.to_csv('output.csv', index=False)
-
-
 def train_by_lightgbm():
     train_org_data = pd.read_csv(TRAIN_PATH)
     test_org_data = pd.read_csv(TEST_PATH)
@@ -453,8 +371,9 @@ def train_by_lightgbm():
     length = len(train_data)
     # 特征工程，处理nan值-- 1.08912提升到1.08889，说明某些字段的nan值是对预测结果有影响的
     all_data = pd.concat([train_data, test_data])
-    for col in FILL_NAN_FIELD:
-        all_data = nan_to_mean(all_data, col, -1)
+    # for col in FILL_NAN_FIELD:
+    #     all_data = nan_to_mean(all_data, col, -1)
+    all_data = deal_nan_data(all_data)
     # log_data(all_data, 'Annual Income')
     cols_names = all_data.columns
     # scaler = StandardScaler()
@@ -485,10 +404,34 @@ def analysis_data(data: pd.DataFrame):
 
 # deal_nan_data 通过分析后将某列的值赋为合理值
 def deal_nan_data(data: pd.DataFrame):
-    # NP_FIELD = ['Age', 'Annual Income', 'Number of Dependents', 'Health Score', 'Premium Amount', 'Policy Start Date']
-    data['Annual Income'] = data['Annual Income'].fillna(74998.5)
-    data['Health Score'] = data['Health Score'].fillna(49.5)
-
+    # 'Age', 'Annual Income', 'Number of Dependents', 'Health Score', 'Previous Claims', 'Vehicle Age', 'Credit Score', 'Insurance Duration'
+    for col in FILL_NAN_FIELD:
+        max = data[col].max()
+        min = data[col].min()
+        if col == 'Annual Income':
+            # 右端
+            data = nan_to_mean(data, col, max)
+        elif col == 'Health Score':
+            # 右端
+            data = nan_to_mean(data, col, max)
+        elif col == 'Previous Claims':
+            # 左端
+            data = nan_to_mean(data, col, min)
+        elif col == 'Age':
+            # 平均值
+            data = nan_to_mean(data, col)
+        elif col == 'Credit Score':
+            # 右端
+            data = nan_to_mean(data, col, max)
+        elif col == 'Insurance Duration':
+            # 平均值
+            data = nan_to_mean(data, col)
+        elif col == 'Vehicle Age':
+            # 平均值
+            data = nan_to_mean(data, col)
+        else:
+            data = nan_to_mean(data, col, -1)
+    return data
 
 def shikamaru_answer():
     light_model = LGBMRegressor(random_state=42, verbosity=-1, device='gpu')
