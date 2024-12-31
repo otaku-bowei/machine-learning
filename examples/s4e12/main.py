@@ -74,7 +74,7 @@ TEST_NP_FIELD = ['Age', 'Annual Income', 'Number of Dependents', 'Previous Claim
                  'Policy Start Date', 'nan_count']
 CATEGORICAL_FEATURE = ['Gender', 'Marital Status', 'Education Level', 'Occupation', 'Location', 'Policy Type',
                        'Customer Feedback', 'Smoking Status', 'Exercise Frequency', 'Property Type']
-FILL_NAN_FIELD = ['Age', 'Annual Income', 'Number of Dependents', 'Health Score']
+FILL_NAN_FIELD = ['Age', 'Annual Income', 'Number of Dependents', 'Health Score','Previous Claims']
 params = {
     'bagging_freq': 5,
     'bagging_fraction': 1.0,
@@ -300,12 +300,14 @@ def train_by_nn(model: tf.keras.models.Sequential = None):
             tf.keras.layers.Dropout(0.2),
             tf.keras.layers.Dense(1)
         ])
+    # train_data.to_csv('train_data.csv', index=False)
     # loss_fn = tf.keras.losses.MeanSquaredError()
+    # model.compile(optimizer='adam', loss=loss_fn, metrics=['mse'])
     model.compile(optimizer='adam', loss=RMSLE(), metrics=['mse'])
     # 4.2定义tensorBoard
     tensorboard_callback = tb.draw_board('s4e12')
     # 5.进行训练
-    model.fit(train_data, train_label, epochs=5, callbacks=[tensorboard_callback])
+    model.fit(train_data, train_label, epochs=100, callbacks=[tensorboard_callback])
     model.save('nn_model.keras')
     # 6.loss计算--抽取0.2的训练集作为验证
     y_pred = model.predict(valid_d)
