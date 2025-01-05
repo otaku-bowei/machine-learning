@@ -1,7 +1,9 @@
 from enum import Enum
 
+import requests
 import sklearn.metrics
 from hillclimbers import climb_hill, partial
+from matplotlib import pyplot as plt
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import root_mean_squared_error
 from sklearn.model_selection import KFold
@@ -53,6 +55,7 @@ def read_csv(file_path: string) -> pd.DataFrame:
 
 TRAIN_PATH = './train.csv'
 TEST_PATH = './test.csv'
+NAN_PATH = './nan_value.csv'
 
 params = {
     'bagging_freq': 5,
@@ -109,15 +112,17 @@ def deal_feature(data: pd.DataFrame) -> pd.DataFrame:
     df = pd.DataFrame()
     df[field] = data.loc[:, [field]]
     df[date_str] = pd.to_datetime(df[field])
-    # df['year'] = df['date'].dt.year
+    df['year'] = df[date_str].dt.year
     df['month'] = df[date_str].dt.month
     df['day'] = df[date_str].dt.day
     df['weekday'] = df[date_str].dt.weekday
     df['day_of_week'] = df[date_str].dt.day_of_week
     data = pd.concat([data, df.drop([field, date_str], axis=1)], axis=1)
-    # 2.标注节假日
+    # 2.标注节假日,GDP 分析
     # data['holiday'] = data.apply(is_holiday, axis=1)
     data = get_holiday(data)
+    gdp = add_gdp(data)
+    data = pd.merge(data, gdp.loc[:, ['date','country','GDP']], how='left', on=['date','country'])
     data = data.drop(field, axis=1).reset_index(drop=True)
     # 3.将店名和产品名做one-hot向量处理
     col_names = ['country', 'store', 'product']
@@ -126,6 +131,15 @@ def deal_feature(data: pd.DataFrame) -> pd.DataFrame:
         data = pd.concat([data, type_one_hot], axis=1)
         data = data.drop(field_name, axis=1).reset_index(drop=True)
     return data
+
+
+# loss_cul 计算回归的loss值
+def loss_cul(data, label: pd.DataFrame, model_name: string):
+    # d = lgb.Dataset(data=data, label=label)
+    y_pred = predict(data, model_name)
+    l_np = label.to_numpy().ravel()
+    loss = (np.abs(l_np - y_pred) / l_np).mean()
+    print(loss)
 
 
 def get_holiday(data: pd.DataFrame):
@@ -160,7 +174,7 @@ def mape(y_pred, data):
     y_true = data.get_label()
     # y_true, y_pred = pd.Series(y_true), pd.Series(y_pred)
     # 计算MAPE
-    mape = (np.abs(y_true - y_pred) / y_true).mean() * 100
+    mape = (np.abs(y_true - y_pred) / y_true).mean()
     return 'MAPE', mape, False
 
 
@@ -178,6 +192,7 @@ def train(train_data, train_label: pd.DataFrame):
     bst = lgb.train(params, data, num_boost_round=100, valid_sets=[valid], feval=mape, )
     # 获取评估指标值
     bst.save_model('model.txt', num_iteration=bst.best_iteration)
+    loss_cul(valid_d, valid_l, 'model.txt')
     return bst
 
 
@@ -202,15 +217,57 @@ def train_by_lightgbm(train_data, train_label, test_data, test_id: pd.DataFrame)
 def sout_nan_data(train_data: pd.DataFrame):
     nan_values = train_data.loc[train_data.num_sold.isna(), :]
     nan_values.to_csv('nan_value.csv', index=False)
+    print_dp(nan_values)
+
+
+def decompose(train, c, ax):
+    df = train.groupby(['date', c])[['num_sold']].sum().reset_index().join(
+        train.groupby('date')[['num_sold']].sum(), on='date', rsuffix='_global')
+    df['fractions'] = df['num_sold'] / df['num_sold_global']
+    for m in np.sort(df[c].unique()):
+        mask = df[c] == m
+        ax.plot(df[mask]['date'], df[mask]['fractions'], label=m)
+    ax.legend(bbox_to_anchor=(1, 1))
+
+
+'''
+发现比例，国家的影响，受国家GDP影响，和GDP曲线类似，根据时间推移，加上GDP信息列，但是 部分时间会不准
+'''
+def get_gdp_per_capita(alpha3, year):
+    url='https://api.worldbank.org/v2/country/{0}/indicator/NY.GDP.PCAP.CD?date={1}&format=json'
+    response = requests.get(url.format(alpha3,year)).json()
+    return response[1][0]['value']
+
+def add_gdp(data: pd.DataFrame):
+    df = data.loc[:, ['date', 'country', 'year']]
+    alpha3s = ['CAN', 'FIN', 'ITA', 'KEN', 'NOR', 'SGP']
+    df['alpha3'] = df['country'].map(dict(zip(
+        np.sort(df['country'].unique()), alpha3s)))
+    years = np.sort(df.year.unique())
+    gdp = np.array([
+        [get_gdp_per_capita(alpha3, year) for year in years]
+        for alpha3 in alpha3s
+    ])
+    gdp = pd.DataFrame(gdp / gdp.sum(axis=0), index=alpha3s, columns=years)
+    df['GDP']= df.apply(lambda s: gdp.loc[s['alpha3'], s['year']], axis=1)
+    df = df.sort_values(by=['date', 'country']).drop_duplicates()
+    df.to_csv('GDP.csv', index=False)
+    return df
 
 
 # main 主函数
 def main():
     train_org_data = read_csv(TRAIN_PATH)
+    # train_org_data = read_csv(NAN_PATH)
     test_org_data = read_csv(TEST_PATH)
     train_data, train_label, test_data, test_id = deal_data(train_org_data, test_org_data)
     train_by_lightgbm(train_data, train_label, test_data, test_id)
     # sout_nan_data(train_org_data)
+    # _, ax = plt.subplots()
+    # decompose(train_org_data, 'product', ax)
+    # decompose(train_org_data, 'store', ax)
+    # decompose(train_org_data, 'country', ax)
+    # plt.show()
 
 
 if __name__ == "__main__":
