@@ -66,7 +66,7 @@ params = {
     'learning_rate': 0.005,
     'max_depth': -1,
     # 均方差损失标准
-    'metric': 'rmse',
+    'metric': 'mape',
     # 'metric': 'l2',
     'min_data_in_leaf': 30,
     'min_sum_hessian_in_leaf': 10.0,
@@ -82,9 +82,10 @@ params = {
 
 # deal_data 数据特征处理
 def deal_data(train_data, test_data: pd.DataFrame):
-    print()
     # 1.对销售数据为空的数据补0
-    train_data = train_data.fillna(50.0)
+    # train_data = train_data.fillna(100)
+    # 1.1 对空值删除，不进行训练
+    train_data = train_data.loc[train_data['num_sold'].notna(), :]
     # 2.训练集乱序
     train_data = train_data.sample(frac=1).reset_index(drop=True)
     # 3.特征和标签区分
@@ -121,11 +122,11 @@ def deal_feature(data: pd.DataFrame) -> pd.DataFrame:
     # 2.标注节假日,GDP 分析
     # data['holiday'] = data.apply(is_holiday, axis=1)
     data = get_holiday(data)
-    gdp = add_gdp(data)
-    data = pd.merge(data, gdp.loc[:, ['date','country','GDP']], how='left', on=['date','country'])
-    data = data.drop(field, axis=1).reset_index(drop=True)
+    gdp = add_gdp(data, 'GDP.csv')
+    data = pd.merge(data, gdp.loc[:, ['date', 'country', 'GDP']], how='left', on=['date', 'country'])
+    data = data.drop([field, 'country'], axis=1).reset_index(drop=True)
     # 3.将店名和产品名做one-hot向量处理
-    col_names = ['country', 'store', 'product']
+    col_names = ['store', 'product']
     for field_name in col_names:
         type_one_hot = one_hot_numpy(data, field_name)
         data = pd.concat([data, type_one_hot], axis=1)
@@ -189,7 +190,7 @@ def train(train_data, train_label: pd.DataFrame):
     valid_l = train_label.loc[index:, :]
     data = lgb.Dataset(train_d, label=train_l)
     valid = lgb.Dataset(valid_d, label=valid_l)
-    bst = lgb.train(params, data, num_boost_round=100, valid_sets=[valid], feval=mape, )
+    bst = lgb.train(params, data, num_boost_round=1600, valid_sets=[valid], feval=mape, )
     # 获取评估指标值
     bst.save_model('model.txt', num_iteration=bst.best_iteration)
     loss_cul(valid_d, valid_l, 'model.txt')
@@ -217,7 +218,7 @@ def train_by_lightgbm(train_data, train_label, test_data, test_id: pd.DataFrame)
 def sout_nan_data(train_data: pd.DataFrame):
     nan_values = train_data.loc[train_data.num_sold.isna(), :]
     nan_values.to_csv('nan_value.csv', index=False)
-    print_dp(nan_values)
+    # 根据国家显示确实的数据
 
 
 def decompose(train, c, ax):
@@ -233,12 +234,17 @@ def decompose(train, c, ax):
 '''
 发现比例，国家的影响，受国家GDP影响，和GDP曲线类似，根据时间推移，加上GDP信息列，但是 部分时间会不准
 '''
+
+
 def get_gdp_per_capita(alpha3, year):
-    url='https://api.worldbank.org/v2/country/{0}/indicator/NY.GDP.PCAP.CD?date={1}&format=json'
-    response = requests.get(url.format(alpha3,year)).json()
+    url = 'https://api.worldbank.org/v2/country/{0}/indicator/NY.GDP.PCAP.CD?date={1}&format=json'
+    response = requests.get(url.format(alpha3, year)).json()
     return response[1][0]['value']
 
-def add_gdp(data: pd.DataFrame):
+
+def add_gdp(data: pd.DataFrame, name: str = None):
+    if name is not None:
+        return pd.read_csv(name)
     df = data.loc[:, ['date', 'country', 'year']]
     alpha3s = ['CAN', 'FIN', 'ITA', 'KEN', 'NOR', 'SGP']
     df['alpha3'] = df['country'].map(dict(zip(
@@ -249,7 +255,7 @@ def add_gdp(data: pd.DataFrame):
         for alpha3 in alpha3s
     ])
     gdp = pd.DataFrame(gdp / gdp.sum(axis=0), index=alpha3s, columns=years)
-    df['GDP']= df.apply(lambda s: gdp.loc[s['alpha3'], s['year']], axis=1)
+    df['GDP'] = df.apply(lambda s: gdp.loc[s['alpha3'], s['year']], axis=1)
     df = df.sort_values(by=['date', 'country']).drop_duplicates()
     df.to_csv('GDP.csv', index=False)
     return df
