@@ -80,12 +80,27 @@ params = {
 }
 
 
+def fill_row(x):
+    if x['num_sold'].isna() & x['country'] == 'Canada':
+        return 500
+    elif x['num_sold'].isna() & x['country'] == 'Kenya':
+        return 20
+    else:
+        return x['num_sold']
+
+
 # deal_data 数据特征处理
 def deal_data(train_data, test_data: pd.DataFrame):
-    # 1.对销售数据为空的数据补0
-    # train_data = train_data.fillna(100)
+    # 1.对销售数据为空的数据补0--Canada赋值500其余20
+    # train_data.loc[:, 'num_sold'] = train_data.apply(lambda x: fill_row(x), axis=1)
     # 1.1 对空值删除，不进行训练
+    # nan_data = sout_nan_data(train_data)
     train_data = train_data.loc[train_data['num_sold'].notna(), :]
+    # train_data = pd.concat([train_data, nan_data], axis=0)
+    # 1.2 对空值根据日期排序，国家和店名相同的填补前一天或后一天的值
+    # train_data = train_data.sort_values(by=['country', 'store', 'product', 'date'], ascending=True)
+    # train_data['num_sold'] = train_data.apply(lambda row: fill_na_based_on_b(row, train_data), axis=1)
+    # train_data = train_data.fillna(100)
     # 2.训练集乱序
     train_data = train_data.sample(frac=1).reset_index(drop=True)
     # 3.特征和标签区分
@@ -98,7 +113,7 @@ def deal_data(train_data, test_data: pd.DataFrame):
     all_data = pd.concat([train_data, test_data], axis=0)
     all_data = deal_feature(all_data)
     cols_names = all_data.columns
-    print_dp(all_data)
+    # print_dp(all_data)
     # 5.再分为训练集和测试集
     train_data = pd.DataFrame(all_data, columns=cols_names).iloc[0:length, :]
     test_data = pd.DataFrame(all_data, columns=cols_names).iloc[length:, :]
@@ -124,14 +139,30 @@ def deal_feature(data: pd.DataFrame) -> pd.DataFrame:
     data = get_holiday(data)
     gdp = add_gdp(data, 'GDP.csv')
     data = pd.merge(data, gdp.loc[:, ['date', 'country', 'GDP']], how='left', on=['date', 'country'])
-    data = data.drop([field, 'country'], axis=1).reset_index(drop=True)
+    # data = data.drop([field, 'country'], axis=1).reset_index(drop=True)
+    data = data.drop([field, ], axis=1).reset_index(drop=True)
     # 3.将店名和产品名做one-hot向量处理
-    col_names = ['store', 'product']
+    col_names = ['store', 'product', 'country']
     for field_name in col_names:
         type_one_hot = one_hot_numpy(data, field_name)
         data = pd.concat([data, type_one_hot], axis=1)
         data = data.drop(field_name, axis=1).reset_index(drop=True)
     return data
+
+
+def fill_na_based_on_b(row, df):
+    if pd.isna(row['num_sold']):
+        # 查找上一行和下一行的B列值
+        prev_b = df.loc[row.name - 1, 'country'] if row.name > 0 else None
+        next_b = df.loc[row.name + 1, 'country'] if row.name < len(df) - 1 else None
+        # 如果上一行的B列值相同，则用上一行的A列值填补
+        if prev_b == row['country']:
+            return df.loc[row.name - 1, 'num_sold']
+        # 如果下一行的B列值相同，则用下一行的A列值填补
+        elif next_b == row['country']:
+            return df.loc[row.name + 1, 'num_sold']
+    # 如果A列不是空值，则直接返回该值
+    return row['num_sold']
 
 
 # loss_cul 计算回归的loss值
@@ -179,6 +210,9 @@ def mape(y_pred, data):
     return 'MAPE', mape, False
 
 
+TYPE_FIELDS = ['store', 'product', 'country']
+
+
 def train(train_data, train_label: pd.DataFrame):
     # 将训练集分为训练数据和交叉验证数据
     length = len(train_data)
@@ -188,8 +222,10 @@ def train(train_data, train_label: pd.DataFrame):
     valid_d = train_data.loc[index:, :]
     train_l = train_label.loc[:index, :]
     valid_l = train_label.loc[index:, :]
-    data = lgb.Dataset(train_d, label=train_l)
-    valid = lgb.Dataset(valid_d, label=valid_l)
+    # data = lgb.Dataset(train_d, label=train_l, categorical_feature=TYPE_FIELDS)
+    # valid = lgb.Dataset(valid_d, label=valid_l, reference=data)
+    data = lgb.Dataset(train_d, label=train_l, )
+    valid = lgb.Dataset(valid_d, label=valid_l, )
     bst = lgb.train(params, data, num_boost_round=1600, valid_sets=[valid], feval=mape, )
     # 获取评估指标值
     bst.save_model('model.txt', num_iteration=bst.best_iteration)
@@ -217,7 +253,9 @@ def train_by_lightgbm(train_data, train_label, test_data, test_id: pd.DataFrame)
 
 def sout_nan_data(train_data: pd.DataFrame):
     nan_values = train_data.loc[train_data.num_sold.isna(), :]
+    nan_values.loc[:, 'num_sold'] = nan_values.apply(lambda x: 800 if x['country'] == 'Canada' else 20, axis=1)
     nan_values.to_csv('nan_value.csv', index=False)
+    return nan_values
     # 根据国家显示确实的数据
 
 
@@ -268,8 +306,11 @@ def main():
     test_org_data = read_csv(TEST_PATH)
     train_data, train_label, test_data, test_id = deal_data(train_org_data, test_org_data)
     train_by_lightgbm(train_data, train_label, test_data, test_id)
-    # sout_nan_data(train_org_data)
+    # sout_nan_data(pd.concat([train_data, train_label], axis=1))
+    # sout_nan_data(train_org_data.sort_values(by=['country', 'store', 'product','date']))
     # _, ax = plt.subplots()
+    # print_dp(train_org_data.loc[train_org_data.country == 'Kenya', :])
+    # train_org_data.fillna(50)
     # decompose(train_org_data, 'product', ax)
     # decompose(train_org_data, 'store', ax)
     # decompose(train_org_data, 'country', ax)
