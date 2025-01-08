@@ -133,12 +133,13 @@ def deal_feature(data: pd.DataFrame) -> pd.DataFrame:
     df['day'] = df[date_str].dt.day
     df['weekday'] = df[date_str].dt.weekday
     df['day_of_week'] = df[date_str].dt.day_of_week
+    df['is_sunday'] = (df[date_str].dt.dayofweek == 6).astype(int)
     data = pd.concat([data, df.drop([field, date_str], axis=1)], axis=1)
     # 2.标注节假日,GDP 分析
     # data['holiday'] = data.apply(is_holiday, axis=1)
     data = get_holiday(data)
-    gdp = add_gdp(data, 'GDP.csv')
-    data = pd.merge(data, gdp.loc[:, ['date', 'country', 'GDP']], how='left', on=['date', 'country'])
+    # gdp = add_gdp(data, 'GDP.csv')
+    # data = pd.merge(data, gdp.loc[:, ['date', 'country', 'GDP']], how='left', on=['date', 'country'])
     # data = data.drop([field, 'country'], axis=1).reset_index(drop=True)
     data = data.drop([field, ], axis=1).reset_index(drop=True)
     # 3.将店名和产品名做one-hot向量处理
@@ -299,13 +300,17 @@ def add_gdp(data: pd.DataFrame, name: str = None):
     return df
 
 
+def data_rel_csv(data: pd.DataFrame):
+    data = data.sort_values(by=['date', 'country'])
+    data.to_csv('some_data.csv', index=False)
+
 # main 主函数
 def main():
     train_org_data = read_csv(TRAIN_PATH)
     # train_org_data = read_csv(NAN_PATH)
-    test_org_data = read_csv(TEST_PATH)
-    train_data, train_label, test_data, test_id = deal_data(train_org_data, test_org_data)
-    train_by_lightgbm(train_data, train_label, test_data, test_id)
+    # test_org_data = read_csv(TEST_PATH)
+    # train_data, train_label, test_data, test_id = deal_data(train_org_data, test_org_data)
+    # train_by_lightgbm(train_data, train_label, test_data, test_id)
     # sout_nan_data(pd.concat([train_data, train_label], axis=1))
     # sout_nan_data(train_org_data.sort_values(by=['country', 'store', 'product','date']))
     # _, ax = plt.subplots()
@@ -315,6 +320,9 @@ def main():
     # decompose(train_org_data, 'store', ax)
     # decompose(train_org_data, 'country', ax)
     # plt.show()
+    # grouped = train_org_data.loc[:, ['date', 'country', 'num_sold']].groupby(['date', 'country']).sum().reset_index()
+    # data_rel_csv(grouped.loc[grouped.country=='Kenya', :])
+    print(train_org_data[train_org_data.num_sold.isnull() == True].groupby(['product', 'store', 'country', ]).agg({'id': 'count'}))
 
 
 if __name__ == "__main__":
