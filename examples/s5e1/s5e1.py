@@ -49,11 +49,12 @@ def print_dp(data: pd.DataFrame):
 
 # read_csv 读取csv
 def read_csv(file_path: string) -> pd.DataFrame:
-    df = pd.read_csv(file_path)
+    df = pd.read_csv(file_path, parse_dates=['date'])
     return df
 
 
 TRAIN_PATH = './train.csv'
+TRAIN_FILL_PATH = './train_fill.csv'
 TEST_PATH = './test.csv'
 NAN_PATH = './nan_value.csv'
 
@@ -128,12 +129,20 @@ def deal_feature(data: pd.DataFrame) -> pd.DataFrame:
     df = pd.DataFrame()
     df[field] = data.loc[:, [field]]
     df[date_str] = pd.to_datetime(df[field])
-    df['year'] = df[date_str].dt.year
+    # df['year'] = df[date_str].dt.year
     df['month'] = df[date_str].dt.month
     df['day'] = df[date_str].dt.day
-    df['weekday'] = df[date_str].dt.weekday
+    # df['weekday'] = df[date_str].dt.weekday
     df['day_of_week'] = df[date_str].dt.day_of_week
-    df['is_sunday'] = (df[date_str].dt.dayofweek == 6).astype(int)
+    # df['is_sunday'] = (df[date_str].dt.dayofweek == 6).astype(int)
+    # df['year_sin'] = np.sin(df['year'])
+    df['month_sin'] = np.sin(df['month'])
+    df['month_cos'] = np.cos(df['month'])
+    # df['day_sin'] = np.sin(df['day'])
+    df["day_of_week_dd"] = df["day_of_week"].apply(lambda x: 0 if x <= 3 else (1 if x == 4 else (2 if x == 5 else 3)))
+    df["day_of_year"] = df['date'].apply(lambda x: x.timetuple().tm_yday if not (x.is_leap_year and x.month > 2) else x.timetuple().tm_yday - 1)
+    df['day_sin'] = np.sin(df['day_of_year'] * (2 * np.pi / 365.0))
+    df['day_cos'] = np.cos(df['day_of_year'] * (2 * np.pi / 365.0))
     data = pd.concat([data, df.drop([field, date_str], axis=1)], axis=1)
     # 2.标注节假日,GDP 分析
     # data['holiday'] = data.apply(is_holiday, axis=1)
@@ -143,12 +152,101 @@ def deal_feature(data: pd.DataFrame) -> pd.DataFrame:
     # data = data.drop([field, 'country'], axis=1).reset_index(drop=True)
     data = data.drop([field, ], axis=1).reset_index(drop=True)
     # 3.将店名和产品名做one-hot向量处理
-    col_names = ['store', 'product', 'country']
+    col_names = ['store', 'product', 'country',  'month', 'day_of_week']
     for field_name in col_names:
         type_one_hot = one_hot_numpy(data, field_name)
         data = pd.concat([data, type_one_hot], axis=1)
-        data = data.drop(field_name, axis=1).reset_index(drop=True)
+        if (field_name != 'month') &  (field_name != 'day_of_week'):
+            data = data.drop(field_name, axis=1).reset_index(drop=True)
     return data
+
+
+def deal_nan_value(data: pd.DataFrame):
+    # gdp_per_capita_df = add_gdp(data, 'GDP.csv')
+    gdp_per_capita_df = pd.read_csv("gdp_per_capita.csv")
+
+    years = ["2010", "2011", "2012", "2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020"]
+    gdp_per_capita_filtered_df = gdp_per_capita_df.loc[gdp_per_capita_df["Country Name"].isin(data["country"].unique()), ["Country Name"] + years].set_index("Country Name")
+    gdp_per_capita_filtered_df["2010_ratio"] = gdp_per_capita_filtered_df["2010"] / gdp_per_capita_filtered_df.sum()[
+        "2010"]
+    for year in years:
+        gdp_per_capita_filtered_df[f"{year}_ratio"] = gdp_per_capita_filtered_df[year] / \
+                                                      gdp_per_capita_filtered_df.sum()[year]
+    gdp_per_capita_filtered_ratios_df = gdp_per_capita_filtered_df[[i + "_ratio" for i in years]]
+    gdp_per_capita_filtered_ratios_df.columns = [int(i) for i in years]
+    gdp_per_capita_filtered_ratios_df = gdp_per_capita_filtered_ratios_df.unstack().reset_index().rename(
+        columns={"level_0": "year", 0: "ratio", "Country Name": "country"})
+    gdp_per_capita_filtered_ratios_df['year'] = pd.to_datetime(gdp_per_capita_filtered_ratios_df['year'], format='%Y')
+
+    # For plotting purposes
+    gdp_per_capita_filtered_ratios_df_2 = gdp_per_capita_filtered_ratios_df.copy()
+    gdp_per_capita_filtered_ratios_df_2["year"] = pd.to_datetime(
+        gdp_per_capita_filtered_ratios_df_2['year'].astype(str)) + pd.offsets.YearEnd(1)
+    gdp_per_capita_filtered_ratios_df = pd.concat([gdp_per_capita_filtered_ratios_df, gdp_per_capita_filtered_ratios_df_2]).reset_index()
+    gdp_per_capita_filtered_ratios_df_2["year"] = gdp_per_capita_filtered_ratios_df_2["year"].dt.year
+    data['year'] = data['date'].dt.year
+    for year in data["year"].unique():
+        # Impute Time Series 1 (Canada, Discount Stickers, Holographic Goose)
+        target_ratio = gdp_per_capita_filtered_ratios_df_2.loc[(gdp_per_capita_filtered_ratios_df_2["year"] == year) & (gdp_per_capita_filtered_ratios_df_2["country"] == "Norway"), "ratio"].values[0]  # Using Norway as should have the best precision
+        current_raito = gdp_per_capita_filtered_ratios_df_2.loc[(gdp_per_capita_filtered_ratios_df_2["year"] == year) & (gdp_per_capita_filtered_ratios_df_2["country"] == "Canada"), "ratio"].values[0]
+        ratio_can = current_raito / target_ratio
+        data.loc[(data["country"] == "Canada") & (data["store"] == "Discount Stickers") & (data["product"] == "Holographic Goose") & (data["year"] == year), "num_sold"] = (data.loc[(data["country"] == "Norway") & (data["store"] == "Discount Stickers") & (data["product"] == "Holographic Goose") & (data["year"] == year), "num_sold"] * ratio_can).values
+
+        # Impute Time Series 2 (Only Missing Values)
+        current_ts = data.loc[(data["country"] == "Canada") & (data["store"] == "Premium Sticker Mart") & (data["product"] == "Holographic Goose") & (data["year"] == year)]
+        missing_ts_dates = current_ts.loc[current_ts["num_sold"].isna(), "date"]
+        data.loc[(data["country"] == "Canada") & (data["store"] == "Premium Sticker Mart") & (data["product"] == "Holographic Goose") & (data["year"] == year) &(data["date"].isin(missing_ts_dates)), "num_sold"] = (data.loc[(data["country"] == "Norway") & (data["store"] == "Premium Sticker Mart") & (data["product"] == "Holographic Goose") & (data["year"] == year) & (data["date"].isin(missing_ts_dates)), "num_sold"] * ratio_can).values
+
+        # Impute Time Series 3 (Only Missing Values)
+        current_ts = data.loc[
+            (data["country"] == "Canada") & (data["store"] == "Stickers for Less") & (
+                    data["product"] == "Holographic Goose") & (data["year"] == year)]
+        missing_ts_dates = current_ts.loc[current_ts["num_sold"].isna(), "date"]
+        data.loc[(data["country"] == "Canada") & (data["store"] == "Stickers for Less") & (data["product"] == "Holographic Goose") & (data["year"] == year) &
+                 (data["date"].isin(missing_ts_dates)), "num_sold"] = (data.loc[(data["country"] == "Norway") & (data["store"] == "Stickers for Less") & (data["product"] == "Holographic Goose") &
+                                                                                (data["year"] == year) & (data["date"].isin(missing_ts_dates)), "num_sold"] * ratio_can).values
+
+        # Impute Time Series 4 (Kenya, Discount Stickers, Holographic Goose)
+        current_raito = gdp_per_capita_filtered_ratios_df_2.loc[
+            (gdp_per_capita_filtered_ratios_df_2["year"] == year) & (
+                    gdp_per_capita_filtered_ratios_df_2["country"] == "Kenya"), "ratio"].values[0]
+        ratio_ken = current_raito / target_ratio
+        data.loc[
+            (data["country"] == "Kenya") & (data["store"] == "Discount Stickers") & (
+                    data["product"] == "Holographic Goose") & (
+                    data["year"] == year), "num_sold"] = (data.loc[(data["country"] == "Norway") & (data["store"] == "Discount Stickers") & (data["product"] == "Holographic Goose") & (data["year"] == year), "num_sold"] * ratio_ken).values
+
+        # Impute Time Series 5 (Only Missing Values)
+        current_ts = data.loc[
+            (data["country"] == "Kenya") & (data["store"] == "Premium Sticker Mart") & (
+                    data["product"] == "Holographic Goose") & (data["year"] == year)]
+        missing_ts_dates = current_ts.loc[current_ts["num_sold"].isna(), "date"]
+        data.loc[
+            (data["country"] == "Kenya") & (data["store"] == "Premium Sticker Mart") & (
+                    data["product"] == "Holographic Goose") & (data["year"] == year) & (
+                data["date"].isin(missing_ts_dates)), "num_sold"] = (data.loc[(data["country"] == "Norway") & (data["store"] == "Premium Sticker Mart") & (data["product"] == "Holographic Goose") &
+                                                                              (data["year"] == year) & (data["date"].isin(missing_ts_dates)), "num_sold"] * ratio_ken).values
+
+        # Impute Time Series 6 (Only Missing Values)
+        current_ts = data.loc[
+            (data["country"] == "Kenya") & (data["store"] == "Stickers for Less") & (
+                    data["product"] == "Holographic Goose") & (data["year"] == year)]
+        missing_ts_dates = current_ts.loc[current_ts["num_sold"].isna(), "date"]
+        data.loc[
+            (data["country"] == "Kenya") & (data["store"] == "Stickers for Less") & (
+                    data["product"] == "Holographic Goose") & (data["year"] == year) & (
+                data["date"].isin(missing_ts_dates)), "num_sold"] = (data.loc[(data["country"] == "Norway") & (data["store"] == "Stickers for Less") & (data["product"] == "Holographic Goose") &
+                                                                              (data["year"] == year) & (data["date"].isin(missing_ts_dates)), "num_sold"] * ratio_ken).values
+
+        # Impute Time Series 7 (Only Missing Values)
+        current_ts = data.loc[
+            (data["country"] == "Kenya") & (data["store"] == "Discount Stickers") & (
+                    data["product"] == "Kerneler") & (data["year"] == year)]
+        missing_ts_dates = current_ts.loc[current_ts["num_sold"].isna(), "date"]
+        data.loc[
+            (data["country"] == "Kenya") & (data["store"] == "Discount Stickers") & (
+                    data["product"] == "Kerneler") & (data["year"] == year) & (
+                data["date"].isin(missing_ts_dates)), "num_sold"] = (data.loc[(data["country"] == "Norway") & (data["store"] == "Discount Stickers") & (data["product"] == "Kerneler") & (data["year"] == year) & (data["date"].isin(missing_ts_dates)), "num_sold"] * ratio_ken).values
 
 
 def fill_na_based_on_b(row, df):
@@ -284,7 +382,10 @@ def get_gdp_per_capita(alpha3, year):
 def add_gdp(data: pd.DataFrame, name: str = None):
     if name is not None:
         return pd.read_csv(name)
-    df = data.loc[:, ['date', 'country', 'year']]
+    df = data.loc[:, ['date', 'country']]
+    datedd = pd.DataFrame()
+    datedd['date'] = pd.to_datetime(df['date'])
+    df['year'] = datedd['date'].dt.year
     alpha3s = ['CAN', 'FIN', 'ITA', 'KEN', 'NOR', 'SGP']
     df['alpha3'] = df['country'].map(dict(zip(
         np.sort(df['country'].unique()), alpha3s)))
@@ -296,6 +397,7 @@ def add_gdp(data: pd.DataFrame, name: str = None):
     gdp = pd.DataFrame(gdp / gdp.sum(axis=0), index=alpha3s, columns=years)
     df['GDP'] = df.apply(lambda s: gdp.loc[s['alpha3'], s['year']], axis=1)
     df = df.sort_values(by=['date', 'country']).drop_duplicates()
+    df[: , 'Country Name'] = df[:, 'country']
     df.to_csv('GDP.csv', index=False)
     return df
 
@@ -304,13 +406,20 @@ def data_rel_csv(data: pd.DataFrame):
     data = data.sort_values(by=['date', 'country'])
     data.to_csv('some_data.csv', index=False)
 
+
 # main 主函数
 def main():
-    train_org_data = read_csv(TRAIN_PATH)
+    # train_org_data = read_csv(TRAIN_PATH)
+    train_org_data = read_csv(TRAIN_FILL_PATH)
+    train_org_data.loc[train_org_data["id"] == 23719, "num_sold"] = 4
+    train_org_data.loc[train_org_data["id"] == 207003, "num_sold"] = 195
+    train_org_data = train_org_data.loc[:, ['id', 'date', 'country', 'store', 'product', 'num_sold']]
+    # deal_nan_value(train_org_data)
+    # train_org_data.to_csv('train_fill.csv', index_label=False)
     # train_org_data = read_csv(NAN_PATH)
-    # test_org_data = read_csv(TEST_PATH)
-    # train_data, train_label, test_data, test_id = deal_data(train_org_data, test_org_data)
-    # train_by_lightgbm(train_data, train_label, test_data, test_id)
+    test_org_data = read_csv(TEST_PATH)
+    train_data, train_label, test_data, test_id = deal_data(train_org_data, test_org_data)
+    train_by_lightgbm(train_data, train_label, test_data, test_id)
     # sout_nan_data(pd.concat([train_data, train_label], axis=1))
     # sout_nan_data(train_org_data.sort_values(by=['country', 'store', 'product','date']))
     # _, ax = plt.subplots()
@@ -322,7 +431,7 @@ def main():
     # plt.show()
     # grouped = train_org_data.loc[:, ['date', 'country', 'num_sold']].groupby(['date', 'country']).sum().reset_index()
     # data_rel_csv(grouped.loc[grouped.country=='Kenya', :])
-    print(train_org_data[train_org_data.num_sold.isnull() == True].groupby(['product', 'store', 'country', ]).agg({'id': 'count'}))
+    # print(train_org_data[train_org_data.num_sold.isnull() == True].groupby(['product', 'store', 'country', ]).agg({'id': 'count'}))
 
 
 if __name__ == "__main__":
