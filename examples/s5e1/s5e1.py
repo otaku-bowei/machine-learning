@@ -8,6 +8,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.metrics import root_mean_squared_error
 from sklearn.model_selection import KFold
 from sklearn.pipeline import make_pipeline
+from sklearn.model_selection import train_test_split
 import string
 from multiprocessing import cpu_count
 import tool.matplotlib.field_analysis as fa
@@ -98,10 +99,6 @@ def deal_data(train_data, test_data: pd.DataFrame):
     # nan_data = sout_nan_data(train_data)
     train_data = train_data.loc[train_data['num_sold'].notna(), :]
     # train_data = pd.concat([train_data, nan_data], axis=0)
-    # 1.2 对空值根据日期排序，国家和店名相同的填补前一天或后一天的值
-    # train_data = train_data.sort_values(by=['country', 'store', 'product', 'date'], ascending=True)
-    # train_data['num_sold'] = train_data.apply(lambda row: fill_na_based_on_b(row, train_data), axis=1)
-    # train_data = train_data.fillna(100)
     # 2.训练集乱序
     train_data = train_data.sample(frac=1).reset_index(drop=True)
     # 3.特征和标签区分
@@ -154,9 +151,9 @@ def deal_feature(data: pd.DataFrame) -> pd.DataFrame:
     # 3.将店名和产品名做one-hot向量处理
     col_names = ['store', 'product', 'country',  'month', 'day_of_week']
     for field_name in col_names:
-        type_one_hot = one_hot_numpy(data, field_name)
+        type_one_hot = pd.get_dummies(data[field_name], prefix=field_name)
         data = pd.concat([data, type_one_hot], axis=1)
-        if (field_name != 'month') &  (field_name != 'day_of_week'):
+        if (field_name != 'month') & (field_name != 'day_of_week'):
             data = data.drop(field_name, axis=1).reset_index(drop=True)
     return data
 
@@ -285,17 +282,6 @@ def get_holiday(data: pd.DataFrame):
     return data
 
 
-# one-hot向量转换为0-1编码
-def one_hot_numpy(data: pd.DataFrame, col_name: string) -> pd.DataFrame:
-    # 创建一个OneHotEncoder对象
-    encoder = OneHotEncoder(sparse_output=False)  # 设置sparse=False以返回密集数组
-    one_hot_encoded_array = encoder.fit_transform(
-        data[[col_name]])
-    one_hot_encoded_df = pd.DataFrame(one_hot_encoded_array, columns=encoder.get_feature_names_out(
-        [col_name]))
-    return one_hot_encoded_df
-
-
 def mape(y_pred, data):
     """
     LightGBM的自定义评估函数格式
@@ -317,10 +303,7 @@ def train(train_data, train_label: pd.DataFrame):
     length = len(train_data)
     # 交叉验证集的比例会稍微影响决策树精度
     index = int(length * 0.5)
-    train_d = train_data.loc[:index, :]
-    valid_d = train_data.loc[index:, :]
-    train_l = train_label.loc[:index, :]
-    valid_l = train_label.loc[index:, :]
+    train_d, valid_d, train_l, valid_l = train_test_split(train_data, train_label, random_state=1)
     # data = lgb.Dataset(train_d, label=train_l, categorical_feature=TYPE_FIELDS)
     # valid = lgb.Dataset(valid_d, label=valid_l, reference=data)
     data = lgb.Dataset(train_d, label=train_l, )
@@ -409,8 +392,8 @@ def data_rel_csv(data: pd.DataFrame):
 
 # main 主函数
 def main():
-    # train_org_data = read_csv(TRAIN_PATH)
-    train_org_data = read_csv(TRAIN_FILL_PATH)
+    train_org_data = read_csv(TRAIN_PATH)
+    # train_org_data = read_csv(TRAIN_FILL_PATH)
     train_org_data.loc[train_org_data["id"] == 23719, "num_sold"] = 4
     train_org_data.loc[train_org_data["id"] == 207003, "num_sold"] = 195
     train_org_data = train_org_data.loc[:, ['id', 'date', 'country', 'store', 'product', 'num_sold']]
