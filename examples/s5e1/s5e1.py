@@ -340,7 +340,6 @@ def sout_nan_data(train_data: pd.DataFrame):
     return nan_values
     # 根据国家显示确实的数据
 
-
 def decompose(train, c, ax):
     df = train.groupby(['date', c])[['num_sold']].sum().reset_index().join(
         train.groupby('date')[['num_sold']].sum(), on='date', rsuffix='_global')
