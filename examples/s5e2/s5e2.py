@@ -14,7 +14,7 @@ from sklearn.model_selection import train_test_split
 
 # train_org_data = pd.read_csv('/kaggle/input/playground-series-s5e2/train.csv')
 # test_org_data = pd.read_csv('/kaggle/input/playground-series-s5e2/test.csv')
-train_org_data = pd.read_csv('training_extra.csv')
+train_org_data = pd.read_csv('train.csv')
 test_org_data = pd.read_csv('test.csv')
 train_data, valid_data, train_label, valid_label = train_test_split(train_org_data.drop(['id', 'Price'], axis=1), train_org_data['Price'], test_size=0.2)
 test_data, test_id = test_org_data.drop(['id'], axis=1), test_org_data['id']
@@ -22,8 +22,10 @@ test_data, test_id = test_org_data.drop(['id'], axis=1), test_org_data['id']
 import seaborn as sns
 
 def ana_train_data():
+    print('hello')
     # sns.lineplot(train_data, y='Price', x='Brand', hue='Laptop Compartment')
-    sns.swarmplot(x=train_org_data['Brand'], y=train_org_data['Price'])
+    # sns.swarmplot(x=train_org_data['Brand'], y=train_org_data['Price'])
+    df = train_org_data.loc[:, 'Price']
 
 
 # 2.
