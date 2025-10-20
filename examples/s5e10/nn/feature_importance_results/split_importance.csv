@@ -1,0 +1,13 @@
+Feature,split_importance
+curvature,11440
+weather,4489
+num_reported_accidents,3650
+speed_limit,2677
+lighting,2482
+num_lanes,1163
+holiday,1054
+public_road,938
+time_of_day,874
+road_type,702
+road_signs_present,400
+school_season,131
