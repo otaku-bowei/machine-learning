@@ -4,6 +4,7 @@ import lightgbm as lgb
 import os
 from datetime import datetime
 
+from examples.s5e10.nn.contant import Data
 from examples.s5e10.nn.data import read_org_data
 
 
@@ -229,9 +230,10 @@ model = load_lgbm_model('lightgbm_model.txt')
 
 # 2. 加载和预处理数据
 _, data = read_org_data()
-categorical_columns = ['road_type', 'lighting', 'weather', 'time_of_day',
-                      'holiday', 'school_season', 'road_signs_present', 'public_road']
-X = preprocess_new_data(data, categorical_columns)
+# categorical_columns = ['road_type', 'lighting', 'weather', 'time_of_day',
+#                       'holiday', 'school_season', 'road_signs_present', 'public_road']
+X = preprocess_new_data(data, Data.get('type_feature'))
+X['curvature_range'] = (X['curvature'] > 0.5).astype(int)
 
 # 3. 进行预测
 predictions = predict_with_model(model, X)

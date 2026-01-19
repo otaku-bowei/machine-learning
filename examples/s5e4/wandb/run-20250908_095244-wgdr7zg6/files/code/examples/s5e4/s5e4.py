@@ -51,41 +51,20 @@ train_losses = []
 valid_losses = []
 iterations = []
 
-
 def log_metrics(env):
-    """记录每轮训练的详细参数和结果"""
-    if len(env.evaluation_result_list) > 0:
-        # 获取验证集RMSE
+    """记录训练过程中的指标"""
+    if env.evaluation_result_list:
         valid_rmse = env.evaluation_result_list[0][2]
+        iterations.append(env.iteration)
+        valid_losses.append(valid_rmse)
 
-        # 获取当前模型参数
-        current_params = env.params
-
-        # 记录所有关键信息
-        wandb.log({
-            "iteration": env.iteration,
-            "valid_rmse": valid_rmse,
-            "learning_rate": current_params.get('learning_rate', 0.09458256238967232),
-            "max_depth": current_params.get('max_depth', 10),
-            "num_leaves": current_params.get('num_leaves', 256),
-            "feature_fraction": current_params.get('feature_fraction', 0.5290646151646433),
-            "bagging_fraction": current_params.get('bagging_fraction', 0.8336637608522288),
-            "min_data_in_leaf": current_params.get('min_data_in_leaf', 51),
-            "best_iteration": env.model.best_iteration if hasattr(env.model, 'best_iteration') else env.iteration
-        })
-
-        # 每50轮额外记录特征重要性
+        # 每50轮记录一次
         if env.iteration % 50 == 0:
-            feature_importance = pd.DataFrame({
-                'feature': env.model.feature_name(),
-                'importance': env.model.feature_importance(importance_type='gain')
-            }).sort_values('importance', ascending=False).head(10)
-
             wandb.log({
-                f"feature_importance_iter_{env.iteration}": wandb.Table(dataframe=feature_importance)
+                "valid_rmse": valid_rmse,
+                "iteration": env.iteration,
+                "best_iteration": env.model.best_iteration
             })
-
-
 def lgb_train(train_df, test_df: pd.DataFrame):
     # 数据清洗
     train_df = train_df.drop(['id'], axis=1)

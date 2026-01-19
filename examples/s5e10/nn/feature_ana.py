@@ -1,8 +1,13 @@
+import os
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
+
+from examples.s5e10.nn.contant import Data
+from examples.s5e10.nn.data import read_org_data
 
 
 def analyze_feature_impact(importance_file, train_file, output_dir=None):
@@ -122,10 +127,10 @@ def analyze_feature_impact(importance_file, train_file, output_dir=None):
 
                 if risk_diff > 0.1:  # 风险差异显著
                     high_risk_cats = category_risks[category_risks['mean'] > (min_risk + risk_diff / 2)][
-                        'Feature'].tolist()
+                        feature].tolist()
                     feature_analysis['impact_description'] = f"高风险类别: {high_risk_cats}"
                     analysis_results['key_insights'].append(
-                        f"{feature}特征中，{', '.join(high_risk_cats)}类别的平均事故风险较高")
+                        f"{feature}特征中，{', '.join(map(str, high_risk_cats))}类别的平均事故风险较高")
                 else:
                     feature_analysis['impact_description'] = "不同类别间风险差异较小"
 
@@ -222,12 +227,84 @@ def analyze_feature_impact(importance_file, train_file, output_dir=None):
     return analysis_results
 
 
-# 使用示例
-if __name__ == "__main__":
-    # 文件路径
-    importance_file = "/Volumes/zhitai2/git/python/project/tensorflow-learning/examples/s5e10/nn/feature_importance.csv"
-    train_file = "/Volumes/zhitai2/git/python/project/tensorflow-learning/examples/s5e10/playground-series-s5e10/train.csv"
-    output_dir = "/Volumes/zhitai2/git/python/project/tensorflow-learning/examples/s5e10/nn/analysis_results"
+def ana_feature(feature_field, label_field: str, df: pd.DataFrame, fenlei: bool, output_dir='./analysis_results',):
+    # 创建输出目录（如果不存在）
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # 设置matplotlib字体支持中文
+    plt.rcParams['font.sans-serif'] = ['SimHei']  # 用来正常显示中文标签
+    plt.rcParams['axes.unicode_minus'] = False  # 用来正常显示负号
+    
+    # 使用英文文件名避免编码问题，但图表标题仍使用中文
+    title = f'{feature_field}与{label_field}的关系'
+    safe_filename = f'{feature_field}_vs_{label_field}_{"categorical" if fenlei else "scatter"}'
+    
+    plt.figure(figsize=(10, 6))  # 创建新的图形
+    plt.title(title)
+    if fenlei:
+        sns.barplot(data=df, x='id', y=label_field, hue=feature_field)
+    else:
+        sns.scatterplot(data=df, x=feature_field, y=label_field,)
+    
+    # 保存图片
+    save_path = os.path.join(output_dir, f'{safe_filename}.png')
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    print(f"图片已保存至: {save_path}")
+    
+    # 关闭当前图形以释放内存
+    plt.close()
 
-    # 运行分析
-    results = analyze_feature_impact(importance_file, train_file, output_dir)
+
+# 按分类特征分组的统计分析
+def analyze_categorical_effect(df, categorical_feature, target):
+    # 基本统计
+    stats = df.groupby(categorical_feature)[target].agg(['mean', 'median', 'std', 'count'])
+
+    # 可视化
+    plt.figure(figsize=(10, 6))
+    sns.boxplot(x=categorical_feature, y=target, data=df)
+    plt.title(f'{categorical_feature} 对 {target} 的影响')
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+
+    return stats
+
+
+'''
+curvature,11440
+weather,4489
+num_reported_accidents,3650
+speed_limit,2677
+lighting,2482
+num_lanes,1163
+holiday,1054
+public_road,938
+time_of_day,874
+road_type,702
+road_signs_present,400
+school_season,131
+'''
+importance_data = pd.read_csv('feature_importance.csv')
+importance_feature = importance_data['Feature']
+train_data, _ = read_org_data()
+#
+# for imf in importance_feature:
+#     if imf not in Data.get('type_feature'):
+#         ana_feature(imf, Data.get('label_field'), train_data, True if imf in Data.get('type_feature') else False)
+
+analyze_categorical_effect(train_data, Data.get('type_feature'), Data.get('label_field'))
+
+'''
+1.curvature大于0.5时会明显增加风险
+2.
+'''
+
+# 使用示例
+# if __name__ == "__main__":
+#     # 文件路径
+#     importance_file = "./feature_importance.csv"
+#     train_file = "../playground-series-s5e10/train.csv"
+#     output_dir = "./analysis_results"
+#
+#     # 运行分析
+#     results = analyze_feature_impact(importance_file, train_file, output_dir)

@@ -8,6 +8,8 @@ import seaborn as sns
 import os
 from datetime import datetime
 
+from examples.s5e10.nn.contant import Data
+
 # 设置随机种子以确保可复现性
 np.random.seed(42)
 
@@ -53,7 +55,8 @@ def preprocess_data(df):
 
     print(f"识别到的分类特征: {cat_features}")
 
-    return X, y, cat_features
+    # return X, y, cat_features
+    return X, y, Data.get('type_feature')
 
 
 importance_types = {
@@ -438,13 +441,14 @@ def main():
     print("=== LightGBM 模型训练流程 ===")
 
     # 数据文件路径
-    data_path = '/Volumes/zhitai2/git/python/project/tensorflow-learning/examples/s5e10/playground-series-s5e10/train.csv'
+    data_path = Data.get('train_path')
 
     # 1. 加载和探索数据
     df = load_and_explore_data(data_path)
 
     # 2. 数据预处理
     X, y, cat_features = preprocess_data(df)
+    X['curvature_range'] = (X['curvature'] > 0.5).astype(int)
 
     # 3. 训练模型
     model, X_val, y_val, y_pred, evals_result, importance_df = train_lightgbm_model(X, y, cat_features)

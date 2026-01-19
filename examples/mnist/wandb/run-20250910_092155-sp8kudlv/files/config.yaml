@@ -1,0 +1,76 @@
+_wandb:
+    value:
+        cli_version: 0.21.3
+        code_path: code/examples/mnist/mnist.py
+        e:
+            h50a8wj4xkhecb7vinkx1wnl7kk1azso:
+                codePath: examples\mnist\mnist.py
+                codePathLocal: mnist.py
+                cpu_count: 12
+                cpu_count_logical: 14
+                disk:
+                    /:
+                        total: "510510755840"
+                        used: "438380920832"
+                email: 252795767@qq.com
+                executable: C:\Program Files\Software\python2\python.exe
+                git:
+                    commit: c5c132a0ce2760a1dbae79d682d332cb4d826d36
+                    remote: https://gitee.com/samgee/tensorflow-learning.git
+                host: DESKTOP-RVKLP3L
+                memory:
+                    total: "33785389056"
+                os: Windows-10-10.0.26100-SP0
+                program: C:\Program Files\BusinessFile\python_project\tensorflow-learning\examples\mnist\mnist.py
+                python: CPython 3.11.5
+                root: C:\Program Files\BusinessFile\python_project\tensorflow-learning\examples\mnist
+                startedAt: "2025-09-10T01:21:55.731879Z"
+                writerId: h50a8wj4xkhecb7vinkx1wnl7kk1azso
+        m: []
+        python_version: 3.11.5
+        t:
+            "1":
+                - 2
+                - 3
+            "2":
+                - 2
+                - 3
+            "3":
+                - 3
+                - 8
+                - 13
+                - 15
+                - 16
+                - 62
+            "4": 3.11.5
+            "5": 0.21.3
+            "8":
+                - 3
+            "10":
+                - 9
+                - 17
+            "12": 0.21.3
+            "13": windows-amd64
+batch_size:
+    value: 32
+dropout_rate:
+    value: 0.2
+epochs:
+    value: 5
+hidden_units:
+    value: 128
+input_shape:
+    value:
+        - 28
+        - 28
+learning_rate:
+    value: 0.001
+loss_function:
+    value: SparseCategoricalCrossentropy
+metrics:
+    value:
+        - accuracy
+model_type:
+    value: Sequential
+optimizer:
+    value: adam

@@ -1,0 +1,99 @@
+_wandb:
+    value:
+        cli_version: 0.21.3
+        code_path: code/examples/s5e4/s5e4.py
+        e:
+            zex3idftx41zs6wnt0nu8wxozc8eo392:
+                codePath: examples\s5e4\s5e4.py
+                codePathLocal: s5e4.py
+                cpu_count: 12
+                cpu_count_logical: 14
+                disk:
+                    /:
+                        total: "510510755840"
+                        used: "440826097664"
+                email: 252795767@qq.com
+                executable: C:\Program Files\Software\python2\python.exe
+                git:
+                    commit: c5c132a0ce2760a1dbae79d682d332cb4d826d36
+                    remote: https://gitee.com/samgee/tensorflow-learning.git
+                host: DESKTOP-RVKLP3L
+                memory:
+                    total: "33785389056"
+                os: Windows-10-10.0.26100-SP0
+                program: C:\Program Files\BusinessFile\python_project\tensorflow-learning\examples\s5e4\s5e4.py
+                python: CPython 3.11.5
+                root: C:\Program Files\BusinessFile\python_project\tensorflow-learning\examples\s5e4
+                startedAt: "2025-09-08T01:52:44.013837Z"
+                writerId: zex3idftx41zs6wnt0nu8wxozc8eo392
+        m: []
+        python_version: 3.11.5
+        t:
+            "1":
+                - 2
+                - 3
+                - 5
+                - 8
+                - 53
+                - 54
+            "2":
+                - 2
+                - 3
+                - 5
+                - 8
+                - 53
+                - 54
+            "3":
+                - 13
+                - 15
+                - 16
+            "4": 3.11.5
+            "5": 0.21.3
+            "8":
+                - 3
+            "12": 0.21.3
+            "13": windows-amd64
+bagging_fraction:
+    value: 0.8336637608522288
+bagging_freq:
+    value: 8
+boost:
+    value: gbdt
+boost_from_average:
+    value: "false"
+categorical_features:
+    value: 5
+early_stopping_rounds:
+    value: 50
+feature_fraction:
+    value: 0.5290646151646433
+learning_rate:
+    value: 0.09458256238967232
+max_depth:
+    value: 10
+metric:
+    value: rmse
+min_data_in_leaf:
+    value: 51
+min_sum_hessian_in_leaf:
+    value: 10
+model_type:
+    value: LightGBM
+num_boost_round:
+    value: 500
+num_leaves:
+    value: 256
+num_threads:
+    value: 16
+objective:
+    value: regression
+random_state:
+    value: 1
+task_type:
+    value: regression
+train_size:
+    value: 0.9
+tree_learner:
+    value: serial
+verbosity:
+    value: -1
